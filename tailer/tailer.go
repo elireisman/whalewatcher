@@ -31,6 +31,7 @@ type Publisher struct {
 	state  map[string]Event
 }
 
+// Update status for a particular registered app
 func (p *Publisher) Add(key string, evt Event) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -38,15 +39,43 @@ func (p *Publisher) Add(key string, evt Event) {
 	p.state[key] = evt
 }
 
+// JSON status for one app
 func (p *Publisher) Get(key string) ([]byte, int) {
+	p.lock.RLock()
 	evt, ok := p.state[key]
+	p.lock.RUnlock()
+
+	// if there is no app by that name registered, 400
 	if !ok {
 		return []byte{}, http.StatusNotFound
 	}
 
+	// if the event payload won't marshal, respond 500
 	buf, err := json.Marshal(evt)
 	if err != nil {
-		p.logger.Printf("ERROR failed to marshal event(%+v): %s", evt, err)
+		p.logger.Printf("ERROR failed to marshal event %+v - got: %s", evt, err)
+		return []byte{}, http.StatusInternalServerError
+	}
+
+	// if the app's status is READY, respond 200. if not
+	// ready yet, respond 202, caller should keep polling
+	status := http.StatusAccepted
+	if evt.Ready {
+		status = http.StatusOK
+	}
+
+	return buf, status
+}
+
+// JSON status for all registered apps
+func (p *Publisher) GetAll() ([]byte, int) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+
+	// if the event payload won't marshal, respond 500
+	buf, err := json.Marshal(p.state)
+	if err != nil {
+		p.logger.Printf("ERROR failed to marshal state  %+v - got: %s", p.state, err)
 		return []byte{}, http.StatusInternalServerError
 	}
 
@@ -63,34 +92,36 @@ func NewPublisher() *Publisher {
 
 type Tailer struct {
 	Ctx       context.Context
+	Name      string
 	App       config.App
 	Publisher *Publisher
 	Pattern   *regexp.Regexp
 	Driver    *tail.Tail
 }
 
-func Tail(ctx context.Context, pub *Publisher, app config.App) (*Tailer, error) {
+func Tail(ctx context.Context, pub *Publisher, name string, app config.App) (*Tailer, error) {
 	tailCfg := tail.Config{
-		Logger:    log.New(os.Stdout, fmt.Sprintf("[%s] ", app.Name), log.LstdFlags),
+		Logger:    log.New(os.Stdout, fmt.Sprintf("[%s] ", name), log.LstdFlags),
 		MustExist: true,
 		Follow:    true,
 	}
 
-	t, err := tail.TailFile(app.PathToLog, tailCfg)
+	t, err := tail.TailFile(app.Path, tailCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open log file for tailing at path %q, got: %s", app.PathToLog, err)
+		return nil, fmt.Errorf("failed to open log file for tailing at path %q, got: %s", app.Path, err)
 	}
 
-	check, err := regexp.Compile(app.MessagePattern)
+	check, err := regexp.Compile(app.Pattern)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compile log scanning pattern /%s/ got: %s", app.MessagePattern, err)
+		return nil, fmt.Errorf("failed to compile log scanning pattern /%s/ got: %s", app.Pattern, err)
 	}
 
 	// stub an entry so callers to the HTTP service know the app is registered
-	pub.Add(app.Name, Event{})
+	pub.Add(name, Event{})
 
 	return &Tailer{
 		Ctx:       ctx,
+		Name:      name,
 		App:       app,
 		Publisher: pub,
 		Pattern:   check,
@@ -105,12 +136,12 @@ func (t *Tailer) Start() {
 	for {
 		select {
 		case err := <-t.Ctx.Done():
-			t.Driver.Logger.Printf("INFO tailer for app %q shutting down: %s", t.App.Name, err)
+			t.Driver.Logger.Printf("INFO tailer for app %q shutting down: %s", t.Name, err)
 			return
 
 		case line, ok := <-t.Driver.Lines:
 			if !ok {
-				t.Driver.Logger.Printf("INFO tailer for app %q shutting down", t.App.Name)
+				t.Driver.Logger.Printf("INFO tailer for app %q shutting down", t.Name)
 				return
 			}
 
@@ -120,7 +151,7 @@ func (t *Tailer) Start() {
 					Error: line.Err.Error(),
 				}
 				t.Driver.Logger.Printf("ERROR fatal error while tailing log: %s", line.Err)
-				t.Publisher.Add(t.App.Name, evt)
+				t.Publisher.Add(t.Name, evt)
 				return
 			}
 
@@ -129,8 +160,8 @@ func (t *Tailer) Start() {
 					Ready: true,
 					At:    time.Now().UTC(),
 				}
-				t.Driver.Logger.Printf("INFO log line matched for app %q", t.App.Name)
-				t.Publisher.Add(t.App.Name, evt)
+				t.Driver.Logger.Printf("INFO log line matched for app %q", t.Name)
+				t.Publisher.Add(t.Name, evt)
 				return
 			}
 		}
