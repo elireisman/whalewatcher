@@ -39,32 +39,33 @@ func (p *Publisher) Add(key string, evt Event) {
 	p.state[key] = evt
 }
 
-// JSON status for one app
-func (p *Publisher) Get(key string) ([]byte, int) {
+// Obtain status response for a selection of registered apps
+func (p *Publisher) GetStatuses(apps []string) ([]byte, int) {
 	p.lock.RLock()
-	evt, ok := p.state[key]
+
+	out := map[string]Event{}
+	for _, name := range apps {
+		evt, ok := p.state[name]
+		// if there is no app by that name registered, 400
+		if !ok {
+			p.lock.RUnlock()
+			msg := fmt.Sprintf("requested app (%s) is not registered", name)
+			p.logger.Printf("ERROR %s", msg)
+			return []byte(msg), http.StatusNotFound
+		}
+
+		out[name] = evt
+	}
 	p.lock.RUnlock()
 
-	// if there is no app by that name registered, 400
-	if !ok {
-		return []byte{}, http.StatusNotFound
-	}
-
 	// if the event payload won't marshal, respond 500
-	buf, err := json.Marshal(evt)
+	buf, err := json.Marshal(out)
 	if err != nil {
-		p.logger.Printf("ERROR failed to marshal event %+v - got: %s", evt, err)
-		return []byte{}, http.StatusInternalServerError
+		p.logger.Printf("ERROR failed to marshal status map: %s", err)
+		return []byte("failed to serialize status map"), http.StatusInternalServerError
 	}
 
-	// if the app's status is READY, respond 200. if not
-	// ready yet, respond 202, caller should keep polling
-	status := http.StatusAccepted
-	if evt.Ready {
-		status = http.StatusOK
-	}
-
-	return buf, status
+	return buf, determineStatus(out)
 }
 
 // JSON status for all registered apps
@@ -75,11 +76,11 @@ func (p *Publisher) GetAll() ([]byte, int) {
 	// if the event payload won't marshal, respond 500
 	buf, err := json.Marshal(p.state)
 	if err != nil {
-		p.logger.Printf("ERROR failed to marshal state  %+v - got: %s", p.state, err)
-		return []byte{}, http.StatusInternalServerError
+		p.logger.Printf("ERROR failed to marshal status map: %s", err)
+		return []byte("failed to marshal status map"), http.StatusInternalServerError
 	}
 
-	return buf, http.StatusOK
+	return buf, determineStatus(p.state)
 }
 
 func NewPublisher() *Publisher {
@@ -166,4 +167,25 @@ func (t *Tailer) Start() {
 			}
 		}
 	}
+}
+
+// HTTP Status code in a response is determined in aggregate
+// based on the apps requested:
+// - if any requested app has experienced a tailing error: 503
+// - if any requested app is not ready yet: 202
+// - if all requested apps are error free and ready: 200
+func determineStatus(out map[string]Event) int {
+	status := http.StatusOK
+	for _, evt := range out {
+		if len(evt.Error) > 0 {
+			status = http.StatusServiceUnavailable
+			break
+		}
+		if !evt.Ready {
+			status = http.StatusAccepted
+			break
+		}
+	}
+
+	return status
 }

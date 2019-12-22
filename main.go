@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -35,13 +36,13 @@ func main() {
 		panic(err)
 	}
 
+	logger := log.New(os.Stdout, "[server] ", log.LstdFlags)
 	publisher := tailer.NewPublisher()
 
-	mux := buildMux(publisher)
-
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", Port),
-		Handler: mux,
+		Addr:     fmt.Sprintf(":%d", Port),
+		Handler:  handler(publisher),
+		ErrorLog: logger,
 	}
 
 	ctx, shutdownTailers := context.WithCancel(context.Background())
@@ -52,6 +53,7 @@ func main() {
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 
+		logger.Printf("INFO graceful shutdown initiated")
 		shutdownTailers()
 		srv.Shutdown(context.Background())
 		close(shutdownComplete)
@@ -67,49 +69,35 @@ func main() {
 	}
 
 	if err := srv.ListenAndServe(); err != nil {
-		// TODO: logger, note this in [whalewatcher] scope!
+		logger.Printf("INFO Server shutting down (%s)", err)
 	}
 
 	<-shutdownComplete
+	logger.Printf("INFO shutdown complete")
 }
 
-// compose handler tree for /api and /html
-func buildMux(pub *tailer.Publisher) http.Handler {
+// build http.Handler that processes status events
+func handler(pub *tailer.Publisher) http.Handler {
 	mux := http.NewServeMux()
 
-	// displays all app statuses and redirects to /api endpoint
-	// if an app name appears on the path
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if !checkMethod(w, r) {
 			return
 		}
 
-		appName := strings.TrimPrefix(r.URL.Path, "/")
-		if len(appName) > 0 {
-			newPath := fmt.Sprintf("%s://%s/api/%s", r.URL.Scheme, r.URL.Host, appName)
-			http.Redirect(w, r, newPath, 301)
-			return
+		query := r.URL.Query()
+		rawStatuses := query.Get("status")
+		statuses := strings.Split(rawStatuses, ",")
+
+		var out []byte
+		var status int
+
+		if len(statuses) == 0 || (len(statuses) == 1 && statuses[0] == "*") {
+			out, status = pub.GetAll()
+		} else {
+			out, status = pub.GetStatuses(statuses)
 		}
 
-		out, status := pub.GetAll()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		w.Write(out)
-	})
-
-	// programmatic access, returns plain JSON
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		if !checkMethod(w, r) {
-			return
-		}
-
-		appName := strings.TrimPrefix(r.URL.Path, "/api/")
-		if len(appName) == 0 {
-			http.Error(w, "no app name provided in URL path", http.StatusBadRequest)
-			return
-		}
-
-		out, status := pub.Get(appName)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		w.Write(out)
@@ -118,6 +106,7 @@ func buildMux(pub *tailer.Publisher) http.Handler {
 	return mux
 }
 
+// hydrate the YAML configuration from a file or env var
 func populateConfig() (*config.Config, error) {
 	if len(ConfigVar) > 0 {
 		return config.FromVar(ConfigVar)
@@ -130,6 +119,7 @@ func populateConfig() (*config.Config, error) {
 	return nil, fmt.Errorf("failed to locate YAML config at path %q or in env var %q", ConfigPath, ConfigVar)
 }
 
+// ensure we only respond to GET methods
 func checkMethod(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method == http.MethodGet {
 		return true
