@@ -16,7 +16,6 @@ import (
 	"github.com/elireisman/whalewatcher/config"
 	"github.com/elireisman/whalewatcher/tailer"
 
-	docker_types "github.com/docker/docker/api/types"
 	docker "github.com/docker/docker/client"
 )
 
@@ -71,36 +70,11 @@ func main() {
 		close(shutdownComplete)
 	}()
 
-	// obtain the container ID for each of the specified container names in the config
-	containers, err := client.ContainerList(ctx, docker_types.ContainerListOptions{})
-	if err != nil {
-		panic(err)
-	}
-
-	for _, container := range containers {
-		containerName := strings.TrimPrefix(container.Names[0], "/")
-
-		logger.Printf("CONTAINER: %+v", container) // TODO: DEBUG, REMOVE!
-
-		svc, found := conf.Services[containerName]
-		if found {
-			svc.ID = container.ID
-			conf.Services[containerName] = svc
-		}
-	}
-
 	// start a log monitor for each registered service we found an ID for
 	for name, svc := range conf.Services {
-		if len(svc.ID) == 0 {
-			panic(fmt.Errorf("failed to obtain container ID for container %s", name))
-		}
-
 		waitFor := time.Duration(WaitMillis) * time.Millisecond
-		if err := awaitContainerUp(ctx, client, svc.ID, waitFor); err != nil {
-			panic(err)
-		}
 
-		svcTailer, err := tailer.Tail(ctx, client, publisher, name, svc)
+		svcTailer, err := tailer.New(ctx, client, publisher, name, svc, waitFor)
 		if err != nil {
 			panic(err)
 		}
@@ -132,7 +106,7 @@ func handler(pub *tailer.Publisher) http.Handler {
 		var out []byte
 		var status int
 
-		if len(statuses) == 0 || (len(statuses) == 1 && statuses[0] == "*") {
+		if len(rawStatuses) == 0 || (len(statuses) == 1 && statuses[0] == "*") {
 			out, status = pub.GetAll()
 		} else {
 			out, status = pub.GetStatuses(statuses)
@@ -157,21 +131,6 @@ func populateConfig() (*config.Config, error) {
 	}
 
 	return nil, fmt.Errorf("failed to locate YAML config at path %q or in env var %q", ConfigPath, ConfigVar)
-}
-
-func awaitContainerUp(ctx context.Context, client *docker.Client, containerID string, timeout time.Duration) error {
-	timeoutCtx, cancelable := context.WithTimeout(ctx, timeout)
-	defer cancelable()
-
-	status, err := client.ContainerWait(timeoutCtx, containerID)
-	if err != nil {
-		return err
-	}
-	if status != 200 {
-		return fmt.Errorf("container %s could not be verified as running in %s", containerID, timeout)
-	}
-
-	return nil
 }
 
 // ensure we only respond to GET methods

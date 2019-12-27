@@ -8,83 +8,98 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/elireisman/whalewatcher/config"
 
 	docker_types "github.com/docker/docker/api/types"
+	docker_filters "github.com/docker/docker/api/types/filters"
 	docker "github.com/docker/docker/client"
 	"github.com/hpcloud/tail"
 )
 
 // performs the log monitoring and status publishing for one service container
 type Tailer struct {
-	Ctx  context.Context
-	Name string
-	ID   string
+	Ctx     context.Context
+	Name    string
+	ID      string
+	Pattern *regexp.Regexp
+	Await   time.Duration
 
-	Service   config.Service
 	Publisher *Publisher
-	Pattern   *regexp.Regexp
+	Client    *docker.Client
+	Driver    *tail.Tail
+	Reader    io.ReadCloser
+	Writer    *os.File
 
-	Client *docker.Client
-	Driver *tail.Tail
-	Reader io.ReadCloser
-	Writer *os.File
-
-	Done chan bool
+	Logger *log.Logger
+	Done   chan bool
 }
 
-func Tail(ctx context.Context, client *docker.Client, pub *Publisher, containerName string, target config.Service) (*Tailer, error) {
-	logger := log.New(os.Stdout, fmt.Sprintf("[%s] [%s] ", containerName, target.ID), log.LstdFlags)
-
-	options := docker_types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true}
-	rdr, err := client.ContainerLogs(ctx, target.ID, options)
-	if err != nil {
-		return nil, fmt.Errorf("failed to obtain reader for container log stream: %s", err)
-	}
+func New(ctx context.Context, client *docker.Client, pub *Publisher, containerName string, target config.Service, await time.Duration) (*Tailer, error) {
+	logger := log.New(os.Stdout, fmt.Sprintf("[monitoring: %s] ", containerName), log.LstdFlags)
 
 	check, err := regexp.Compile(target.Pattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile log scanning pattern /%s/ got: %s", target.Pattern, err)
 	}
 
-	pipeFile := pipeName(containerName, target.ID)
-	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
-	wtr, err := os.OpenFile(pipeFile, flags, os.ModeNamedPipe)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open named pipe %s: %s", pipeFile, err)
-	}
+	// register the specified app
+	pub.Add(containerName, Status{At: time.Now().UTC()})
 
-	tailCfg := tail.Config{
-		Logger:    logger,
-		MustExist: true,
-		Follow:    true,
-		Pipe:      true,
-	}
-	t, err := tail.TailFile(pipeFile, tailCfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to tail container logs from pipe %s: %s", pipeFile, err)
-	}
-
-	// now this tailer can be safely registered and visible to callers
-	pub.Add(containerName, Status{})
-
+	// the remaining fields will be populated when Start() is called
 	return &Tailer{
 		Ctx:       ctx,
 		Name:      containerName,
-		ID:        target.ID,
-		Publisher: pub,
+		ID:        "UNKNOWN",
 		Pattern:   check,
-		Driver:    t,
-		Reader:    rdr,
-		Writer:    wtr,
+		Await:     await,
+		Publisher: pub,
+		Client:    client,
+		Logger:    logger,
 		Done:      make(chan bool),
 	}, nil
 }
 
-// to be run in a goroutine by the caller
+// caller should execute this in a goroutine
 func (t *Tailer) Start() {
+	var err error
+
+	// await target container startup and obtain container ID for this run
+	if err = t.awaitContainerUp(); err != nil {
+		t.publishError(err, "target container not up")
+		return
+	}
+
+	// wire up the log stream from the container to our monitor
+	opts := docker_types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true}
+	t.Reader, err = t.Client.ContainerLogs(t.Ctx, t.ID, opts)
+	if err != nil {
+		t.publishError(err, "failed to obtain reader for container log stream")
+		return
+	}
+
+	pipeFile := pipeName(t.Name, t.ID)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	t.Writer, err = os.OpenFile(pipeFile, flags, os.ModeNamedPipe)
+	if err != nil {
+		t.publishError(err, "failed to open named pipe %s", pipeFile)
+		return
+	}
+
+	tailCfg := tail.Config{
+		Logger:    t.Logger,
+		MustExist: true,
+		Follow:    true,
+		Pipe:      true,
+	}
+	t.Driver, err = tail.TailFile(pipeFile, tailCfg)
+	if err != nil {
+		t.publishError(err, "failed to tail container logs from pipe %s", pipeFile)
+		return
+	}
+
 	defer func() {
 		t.Driver.Cleanup()
 
@@ -93,19 +108,17 @@ func (t *Tailer) Start() {
 		t.Writer.Close()
 	}()
 
-	pipeFile := pipeName(t.Name, t.ID)
-
 	// copy log stream from Docker client into named pipe for tailer to consume
 	go func() {
 		for {
 			select {
 			case <-t.Done:
-				t.Driver.Logger.Printf("INFO named pipe %s closing", pipeFile)
+				t.Logger.Printf("INFO named pipe %s closing", pipeFile)
 				return
 
 			default:
 				if _, err := io.Copy(t.Writer, t.Reader); err != nil {
-					t.Driver.Logger.Printf("ERROR copying container logs to named pipe %s: %s", pipeFile, err)
+					t.Logger.Printf("ERROR copying container logs to named pipe %s: %s", pipeFile, err)
 				}
 			}
 		}
@@ -116,17 +129,17 @@ func (t *Tailer) Start() {
 	for {
 		select {
 		case err := <-t.Ctx.Done():
-			t.Driver.Logger.Printf("INFO tailer shutting down gracefully: %s", err)
+			t.Logger.Printf("INFO tailer shutting down gracefully: %s", err)
 			return
 
 		case line, ok := <-t.Driver.Lines:
 			if !ok {
-				t.Driver.Logger.Printf("INFO tailer for service shutting down (feed closed)")
+				t.Logger.Printf("INFO tailer for service shutting down (feed closed)")
 				return
 			}
 
 			if line.Err != nil {
-				t.Driver.Logger.Printf("ERROR while tailing log for service: %s", line.Err)
+				t.Logger.Printf("ERROR while tailing log for service: %s", line.Err)
 				t.Publisher.Add(t.Name, Status{
 					At:    time.Now().UTC(),
 					Error: line.Err.Error(),
@@ -141,7 +154,7 @@ func (t *Tailer) Start() {
 					lineInfo = fmt.Sprintf("near line %d", lineNum)
 				}
 
-				t.Driver.Logger.Printf("INFO target pattern matched log %s", lineInfo)
+				t.Logger.Printf("INFO target pattern matched log %s", lineInfo)
 
 				t.Publisher.Add(t.Name, Status{
 					Ready: true,
@@ -151,6 +164,61 @@ func (t *Tailer) Start() {
 			}
 		}
 	}
+}
+
+func (t *Tailer) awaitContainerUp() error {
+	t.Logger.Println("INFO awaiting container startup")
+
+	timeoutCtx, cancelable := context.WithTimeout(t.Ctx, t.Await)
+	defer cancelable()
+
+	// obtain the container ID for the target service
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+FindIDLoop:
+	for {
+		select {
+		case <-t.Ctx.Done():
+			return fmt.Errorf("failed to obtain container ID for %s in %s: %s", t.Name, t.Await, t.Ctx.Err())
+
+		case <-ticker.C:
+			opts := docker_types.ContainerListOptions{Filters: docker_filters.NewArgs()}
+			opts.Filters.Add("status", "running")
+
+			containers, err := t.Client.ContainerList(timeoutCtx, opts)
+			if err != nil {
+				t.Logger.Printf("WARN failed to obtain container listing: %s", err)
+				continue
+			}
+
+			for _, container := range containers {
+				if t.Name == strings.TrimPrefix(container.Names[0], "/") {
+					t.ID = container.ID
+					t.Logger.Printf("INFO t.Name container %s is up", t.ID)
+					break FindIDLoop
+				}
+			}
+			t.Logger.Println("INFO awaiting container %s startup", t.Name)
+		}
+	}
+
+	// await running status for the container, until the remaining wait time expires
+	status, err := t.Client.ContainerWait(timeoutCtx, t.ID)
+	if err != nil {
+		return fmt.Errorf("problem while awaiting running status for container %s: %s", t.ID, err)
+	}
+	if status != 200 {
+		return fmt.Errorf("container %s could not be verified as running in %s (status %d)", t.ID, t.Await, status)
+	}
+
+	return nil
+}
+
+func (t *Tailer) publishError(err error, format string, args ...interface{}) {
+	msg := fmt.Sprintf(format+": "+err.Error(), args...)
+	t.Logger.Println("ERROR " + msg)
+	t.Publisher.Add(t.Name, Status{At: time.Now().UTC(), Error: msg})
 }
 
 // HTTP Status code in a response is determined
