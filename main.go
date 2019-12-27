@@ -17,7 +17,6 @@ import (
 	"github.com/elireisman/whalewatcher/tailer"
 
 	docker_types "github.com/docker/docker/api/types"
-	docker_filters "github.com/docker/docker/api/types/filters"
 	docker "github.com/docker/docker/client"
 )
 
@@ -32,7 +31,7 @@ func init() {
 	flag.StringVar(&ConfigPath, "config-path", "/etc/whalewatcher/config.yaml", "path to YAML config file")
 	flag.StringVar(&ConfigVar, "config-var", "", "env var storing the YAML config; overrides config-path if present")
 	flag.IntVar(&WaitMillis, "wait-millis", 60000, "milliseconds to await liveness of each container before monitoring")
-	flag.IntVar(&Port, "port", 8080, "port to serve the readiness check endpoint on")
+	flag.IntVar(&Port, "port", 4444, "port to serve the readiness check endpoint on")
 }
 
 func main() {
@@ -73,18 +72,15 @@ func main() {
 	}()
 
 	// obtain the container ID for each of the specified container names in the config
-	listOptions := docker_types.ContainerListOptions{All: true, Filters: docker_filters.NewArgs()}
-	for containerName := range conf.Services {
-		listOptions.Filters.Add("name", containerName)
-	}
-
-	containers, err := client.ContainerList(ctx, listOptions)
+	containers, err := client.ContainerList(ctx, docker_types.ContainerListOptions{})
 	if err != nil {
 		panic(err)
 	}
 
 	for _, container := range containers {
-		containerName := container.Names[0]
+		containerName := strings.TrimPrefix(container.Names[0], "/")
+
+		logger.Printf("CONTAINER: %+v", container) // TODO: DEBUG, REMOVE!
 
 		svc, found := conf.Services[containerName]
 		if found {
