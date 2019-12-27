@@ -7,8 +7,8 @@ services:
     ports:
       - 2181:2181
     environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_CLIENT_PORT: "2181"
+      ZOOKEEPER_TICK_TIME: "2000"
 
   kafka:
     image: confluentinc/cp-kafka:4.1.0
@@ -30,7 +30,7 @@ services:
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.3.1
-    container_name: example-es
+    container_name: example-elasticsearch
     restart: always
     environment:
       - cluster.name=example-es
@@ -69,28 +69,23 @@ services:
     ports:
       - 6379:6379
 
-  monitor:
+  demo_monitor:
     image: whalewatcher:latest
-    container_name: example-monitor
     ports:
-      - 8080:8080
-    command: ["/bin/sleep", "1"] #["/bin/whalewatcher", "--config-var", "MONITOR_CONFIG"]
+      - 4444:4444
+    command: ["/bin/whalewatcher", "--config-var", "MONITOR_CONFIG"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - MONITOR_CONFIG="
-apps:
-  elasticsearch:
-    path:
-    pattern:
-  redis:
-    path:
-    pattern:
-  mysql:
-    path:
-    pattern:
-  kafka:
-    path:
-    patterm:
-  zookeeper:
-    path:
-    pattern:
-"
+      MONITOR_CONFIG: |
+        containers:
+          example-elasticsearch:
+            pattern: TODO
+          example-redis:
+            pattern: TODO
+          example-mysql:
+            pattern: 'mysqld: ready for connections'
+          example-kafka:
+            pattern: TODO
+          example-zookeeper:
+            pattern: TODO"
