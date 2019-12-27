@@ -2,180 +2,168 @@ package tailer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
-	"sync"
 	"time"
 
 	"github.com/elireisman/whalewatcher/config"
+
+	docker_types "github.com/docker/docker/api/types"
+	docker "github.com/docker/docker/client"
 	"github.com/hpcloud/tail"
 )
 
-// status reported for each app
-type Event struct {
-	Ready bool
-	At    time.Time
-	Error string
-}
-
-// publishes status of each app, reporting when the log tailer
-// has matched it's pattern and the app is warmed up and ready
-// to serve, or an error message if the tailer fails.
-type Publisher struct {
-	lock   *sync.RWMutex
-	logger *log.Logger
-	state  map[string]Event
-}
-
-// Update status for a particular registered app
-func (p *Publisher) Add(key string, evt Event) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	p.state[key] = evt
-}
-
-// Obtain status response for a selection of registered apps
-func (p *Publisher) GetStatuses(apps []string) ([]byte, int) {
-	p.lock.RLock()
-
-	out := map[string]Event{}
-	for _, name := range apps {
-		evt, ok := p.state[name]
-		// if there is no app by that name registered, 400
-		if !ok {
-			p.lock.RUnlock()
-			msg := fmt.Sprintf("requested app (%s) is not registered", name)
-			p.logger.Printf("ERROR %s", msg)
-			return []byte(msg), http.StatusNotFound
-		}
-
-		out[name] = evt
-	}
-	p.lock.RUnlock()
-
-	// if the event payload won't marshal, respond 500
-	buf, err := json.Marshal(out)
-	if err != nil {
-		p.logger.Printf("ERROR failed to marshal status map: %s", err)
-		return []byte("failed to serialize status map"), http.StatusInternalServerError
-	}
-
-	return buf, determineStatus(out)
-}
-
-// JSON status for all registered apps
-func (p *Publisher) GetAll() ([]byte, int) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	// if the event payload won't marshal, respond 500
-	buf, err := json.Marshal(p.state)
-	if err != nil {
-		p.logger.Printf("ERROR failed to marshal status map: %s", err)
-		return []byte("failed to marshal status map"), http.StatusInternalServerError
-	}
-
-	return buf, determineStatus(p.state)
-}
-
-func NewPublisher() *Publisher {
-	return &Publisher{
-		lock:   &sync.RWMutex{},
-		logger: log.New(os.Stdout, "[publisher] ", log.LstdFlags),
-		state:  map[string]Event{},
-	}
-}
-
+// performs the log monitoring and status publishing for one service container
 type Tailer struct {
-	Ctx       context.Context
-	Name      string
-	App       config.App
+	Ctx  context.Context
+	Name string
+	ID   string
+
+	Service   config.Service
 	Publisher *Publisher
 	Pattern   *regexp.Regexp
-	Driver    *tail.Tail
+
+	Client *docker.Client
+	Driver *tail.Tail
+	Reader io.ReadCloser
+	Writer *os.File
+
+	Done chan bool
 }
 
-func Tail(ctx context.Context, pub *Publisher, name string, app config.App) (*Tailer, error) {
+func Tail(ctx context.Context, client *docker.Client, pub *Publisher, containerName string, target config.Service) (*Tailer, error) {
+	logger := log.New(os.Stdout, fmt.Sprintf("[%s] [%s] ", containerName, target.ID), log.LstdFlags)
+
+	options := docker_types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true}
+	rdr, err := client.ContainerLogs(ctx, target.ID, options)
+	if err != nil {
+		return nil, fmt.Errorf("failed to obtain reader for container log stream: %s", err)
+	}
+
+	check, err := regexp.Compile(target.Pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile log scanning pattern /%s/ got: %s", target.Pattern, err)
+	}
+
+	pipeFile := pipeName(containerName, target.ID)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	wtr, err := os.OpenFile(pipeFile, flags, os.ModeNamedPipe)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open named pipe %s: %s", pipeFile, err)
+	}
+
 	tailCfg := tail.Config{
-		Logger:    log.New(os.Stdout, fmt.Sprintf("[%s] ", name), log.LstdFlags),
+		Logger:    logger,
 		MustExist: true,
 		Follow:    true,
+		Pipe:      true,
 	}
-
-	t, err := tail.TailFile(app.Path, tailCfg)
+	t, err := tail.TailFile(pipeFile, tailCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open log file for tailing at path %q, got: %s", app.Path, err)
+		return nil, fmt.Errorf("failed to tail container logs from pipe %s: %s", pipeFile, err)
 	}
 
-	check, err := regexp.Compile(app.Pattern)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile log scanning pattern /%s/ got: %s", app.Pattern, err)
-	}
-
-	// stub an entry so callers to the HTTP service know the app is registered
-	pub.Add(name, Event{})
+	// now this tailer can be safely registered and visible to callers
+	pub.Add(containerName, Status{})
 
 	return &Tailer{
 		Ctx:       ctx,
-		Name:      name,
-		App:       app,
+		Name:      containerName,
+		ID:        target.ID,
 		Publisher: pub,
 		Pattern:   check,
 		Driver:    t,
+		Reader:    rdr,
+		Writer:    wtr,
+		Done:      make(chan bool),
 	}, nil
 }
 
 // to be run in a goroutine by the caller
 func (t *Tailer) Start() {
-	defer t.Driver.Cleanup()
+	defer func() {
+		t.Driver.Cleanup()
 
+		close(t.Done)
+		t.Reader.Close()
+		t.Writer.Close()
+	}()
+
+	pipeFile := pipeName(t.Name, t.ID)
+
+	// copy log stream from Docker client into named pipe for tailer to consume
+	go func() {
+		for {
+			select {
+			case <-t.Done:
+				t.Driver.Logger.Printf("INFO named pipe %s closing", pipeFile)
+				return
+
+			default:
+				if _, err := io.Copy(t.Writer, t.Reader); err != nil {
+					t.Driver.Logger.Printf("ERROR copying container logs to named pipe %s: %s", pipeFile, err)
+				}
+			}
+		}
+	}()
+
+	// consume log lines until the context is canceled (global shutdown triggered)
+	// an unrecoverable tailing error occurs, or a matching log line is found
 	for {
 		select {
 		case err := <-t.Ctx.Done():
-			t.Driver.Logger.Printf("INFO tailer for app %q shutting down: %s", t.Name, err)
+			t.Driver.Logger.Printf("INFO tailer shutting down gracefully: %s", err)
 			return
 
 		case line, ok := <-t.Driver.Lines:
 			if !ok {
-				t.Driver.Logger.Printf("INFO tailer for app %q shutting down", t.Name)
+				t.Driver.Logger.Printf("INFO tailer for service shutting down (feed closed)")
 				return
 			}
 
 			if line.Err != nil {
-				evt := Event{
+				t.Driver.Logger.Printf("ERROR while tailing log for service: %s", line.Err)
+				t.Publisher.Add(t.Name, Status{
 					At:    time.Now().UTC(),
 					Error: line.Err.Error(),
-				}
-				t.Driver.Logger.Printf("ERROR fatal error while tailing log: %s", line.Err)
-				t.Publisher.Add(t.Name, evt)
+				})
 				return
 			}
 
 			if t.Pattern.MatchString(line.Text) {
-				evt := Event{
+				var lineInfo string
+				lineNum, err := t.Driver.Tell()
+				if err == nil {
+					lineInfo = fmt.Sprintf("near line %d", lineNum)
+				}
+
+				t.Driver.Logger.Printf("INFO target pattern matched log %s", lineInfo)
+
+				t.Publisher.Add(t.Name, Status{
 					Ready: true,
 					At:    time.Now().UTC(),
-				}
-				t.Driver.Logger.Printf("INFO log line matched for app %q", t.Name)
-				t.Publisher.Add(t.Name, evt)
+				})
 				return
 			}
 		}
 	}
 }
 
-// HTTP Status code in a response is determined in aggregate
-// based on the apps requested:
-// - if any requested app has experienced a tailing error: 503
-// - if any requested app is not ready yet: 202
-// - if all requested apps are error free and ready: 200
-func determineStatus(out map[string]Event) int {
+// HTTP Status code in a response is determined
+// in aggregate based on the apps requested:
+//
+// - if any tailed service (in a user request) is not registered: 404
+// - if any service has experienced a tailing error: 503
+// - if the status update list fails to serialize: 500
+// - if any tailed service is not ready yet: 202
+// - if all tailed services are error free and ready: 200
+func determineStatus(out map[string]Status) int {
 	status := http.StatusOK
+
 	for _, evt := range out {
 		if len(evt.Error) > 0 {
 			status = http.StatusServiceUnavailable
@@ -188,4 +176,8 @@ func determineStatus(out map[string]Event) int {
 	}
 
 	return status
+}
+
+func pipeName(containerName, containerID string) string {
+	return fmt.Sprintf("%s_%s_whalewatcher", containerName, containerID)
 }

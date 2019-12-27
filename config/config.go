@@ -8,22 +8,23 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-// The config file model
+// The config file model - a mapping of container names to monitoring configuration
 type Config struct {
-	Apps map[string]App `yaml:"apps"`
+	Services map[string]Service `yaml:"containers"`
 }
 
 // The configuration for a single app whalewatcher should monitor
-type App struct {
-	// path to the log file to monitor for readiness
-	Path string `yaml:"path"`
+type Service struct {
 	// regex pattern to match in log indicating service readiness
 	Pattern string `yaml:"pattern"`
+
+	// internal: for accessing log streams to monitor from the Docker Engine API
+	ID string `yaml:"-"`
 }
 
 // load config YAML from a file mounted into whalewatcher's container
 func FromFile(pathToFile string) (*Config, error) {
-	conf := &Config{Apps: map[string]App{}}
+	conf := &Config{Services: map[string]Service{}}
 
 	raw, err := ioutil.ReadFile(pathToFile)
 	if err != nil {
@@ -36,7 +37,7 @@ func FromFile(pathToFile string) (*Config, error) {
 
 // local config YAML from an env var injected into whalewatcher's container env
 func FromVar(varName string) (*Config, error) {
-	conf := &Config{Apps: map[string]App{}}
+	conf := &Config{Services: map[string]Service{}}
 
 	raw := os.Getenv(varName)
 	if len(raw) == 0 {

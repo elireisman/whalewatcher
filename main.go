@@ -11,20 +11,27 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/elireisman/whalewatcher/config"
 	"github.com/elireisman/whalewatcher/tailer"
+
+	docker_types "github.com/docker/docker/api/types"
+	docker_filters "github.com/docker/docker/api/types/filters"
+	docker "github.com/docker/docker/client"
 )
 
 var (
 	ConfigPath string
 	ConfigVar  string
+	WaitMillis int
 	Port       int
 )
 
 func init() {
 	flag.StringVar(&ConfigPath, "config-path", "/etc/whalewatcher/config.yaml", "path to YAML config file")
 	flag.StringVar(&ConfigVar, "config-var", "", "env var storing the YAML config; overrides config-path if present")
+	flag.IntVar(&WaitMillis, "wait-millis", 60000, "milliseconds to await liveness of each container before monitoring")
 	flag.IntVar(&Port, "port", 8080, "port to serve the readiness check endpoint on")
 }
 
@@ -48,6 +55,12 @@ func main() {
 	ctx, shutdownTailers := context.WithCancel(context.Background())
 	shutdownComplete := make(chan bool)
 
+	client, err := docker.NewEnvClient()
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -59,13 +72,44 @@ func main() {
 		close(shutdownComplete)
 	}()
 
-	for name, app := range conf.Apps {
-		appTailer, err := tailer.Tail(ctx, publisher, name, app)
+	// obtain the container ID for each of the specified container names in the config
+	listOptions := docker_types.ContainerListOptions{All: true, Filters: docker_filters.NewArgs()}
+	for containerName := range conf.Services {
+		listOptions.Filters.Add("name", containerName)
+	}
+
+	containers, err := client.ContainerList(ctx, listOptions)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, container := range containers {
+		containerName := container.Names[0]
+
+		svc, found := conf.Services[containerName]
+		if found {
+			svc.ID = container.ID
+			conf.Services[containerName] = svc
+		}
+	}
+
+	// start a log monitor for each registered service we found an ID for
+	for name, svc := range conf.Services {
+		if len(svc.ID) == 0 {
+			panic(fmt.Errorf("failed to obtain container ID for container %s", name))
+		}
+
+		waitFor := time.Duration(WaitMillis) * time.Millisecond
+		if err := awaitContainerUp(ctx, client, svc.ID, waitFor); err != nil {
+			panic(err)
+		}
+
+		svcTailer, err := tailer.Tail(ctx, client, publisher, name, svc)
 		if err != nil {
 			panic(err)
 		}
 
-		go appTailer.Start()
+		go svcTailer.Start()
 	}
 
 	if err := srv.ListenAndServe(); err != nil {
@@ -117,6 +161,21 @@ func populateConfig() (*config.Config, error) {
 	}
 
 	return nil, fmt.Errorf("failed to locate YAML config at path %q or in env var %q", ConfigPath, ConfigVar)
+}
+
+func awaitContainerUp(ctx context.Context, client *docker.Client, containerID string, timeout time.Duration) error {
+	timeoutCtx, cancelable := context.WithTimeout(ctx, timeout)
+	defer cancelable()
+
+	status, err := client.ContainerWait(timeoutCtx, containerID)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		return fmt.Errorf("container %s could not be verified as running in %s", containerID, timeout)
+	}
+
+	return nil
 }
 
 // ensure we only respond to GET methods
