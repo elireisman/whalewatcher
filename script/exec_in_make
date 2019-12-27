@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+trap 'trap - SIGINT SIGTERM ERR ; docker-compose down -v ; exit 0' SIGINT SIGTERM ERR
+
+docker-compose run --rm "$1"

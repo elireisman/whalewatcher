@@ -3,16 +3,17 @@ version: '3.4'
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:4.1.0
-    container_name: example-zookeeper
-    ports:
-      - 2181:2181
+    restart: always
+    container_name: demo-zookeeper
+    expose:
+      - 2181
     environment:
       ZOOKEEPER_CLIENT_PORT: "2181"
       ZOOKEEPER_TICK_TIME: "2000"
 
   kafka:
     image: confluentinc/cp-kafka:4.1.0
-    container_name: example-kafka
+    container_name: demo-kafka
     ports:
       - 29092:29092
       - 29093:29093
@@ -20,9 +21,9 @@ services:
       - zookeeper
     environment:
       KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: example-zookeeper:2181
+      KAFKA_ZOOKEEPER_CONNECT: demo-zookeeper:2181
       KAFKA_LISTENERS: EXTERNAL://:29092,INTERNAL://:29093
-      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:29092,INTERNAL://example-kafka:29093
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:29092,INTERNAL://demo-kafka:29093
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
@@ -30,10 +31,9 @@ services:
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.3.1
-    container_name: example-elasticsearch
-    restart: always
+    container_name: demo-elasticsearch
     environment:
-      - cluster.name=example-es
+      - cluster.name=demo-es
       - action.auto_create_index=false
       - bootstrap.memory_lock=true
       - discovery.type=single-node
@@ -57,35 +57,43 @@ services:
 
   mysql:
     image: percona:5.7.21
-    container_name: example-mysql
+    container_name: demo-mysql
     environment:
       - MYSQL_ALLOW_EMPTY_PASSWORD=yes
-    ports:
-      - 3306:3306
+    expose:
+      - 3306
 
   redis:
     image: redis:5.0.7
-    container_name: example-redis
-    ports:
-      - 6379:6379
+    container_name: demo-redis
+    expose:
+      - 6379
 
-  demo_monitor:
+  whalewatcher:
     image: whalewatcher:latest
-    ports:
-      - 4444:4444
+    container_name: demo-whalewatcher
+    expose:
+      - 4444
     command: ["/bin/whalewatcher", "--config-var", "MONITOR_CONFIG"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       MONITOR_CONFIG: |
         containers:
-          example-elasticsearch:
+          demo-elasticsearch:
             pattern: TODO
-          example-redis:
+          demo-redis:
             pattern: TODO
-          example-mysql:
+          demo-mysql:
             pattern: 'mysqld: ready for connections'
-          example-kafka:
+          demo-kafka:
             pattern: TODO
-          example-zookeeper:
-            pattern: TODO"
+          demo-zookeeper:
+            pattern: TODO
+ 
+  awaiting_warmup:
+    image: alpine:latest
+    depends_on:
+      - whalewatcher
+    command: ['/bin/sh', '-c', 'apk update && apk add curl jq && watch -n 3 "curl -sS http://demo-whalewatcher:4444/" | jq .']
+

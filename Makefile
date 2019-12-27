@@ -1,5 +1,5 @@
 build: *.go
-	mkdir -p bin
+	@mkdir -p bin
 	go build -o bin/whalewatcher .
 
 test:
@@ -9,10 +9,15 @@ docker:
 	if ! which -s docker; then echo "Docker not installed"; exit 1; fi
 	docker build -t whalewatcher:latest .
 
+example: docker
+	if ! which -s docker-compose; then echo "docker-compose not installed"; exit 1; fi
+	./script/exec_in_make whalewatcher
+
 demo: docker
-	for TOOL in jq curl docker-compose; do if ! which -s "$$TOOL"; then echo "$$TOOL not installed"; exit 1; fi; done
-	docker-compose run --rm -d demo_monitor && sleep 3 && watch -n 3 'curl -sS http://localhost:4444 | jq .'
+	if ! which -s docker-compose; then echo "docker-compose not installed"; exit 1; fi
+	./script/exec_in_make awaiting_warmup
 
 clean:
-	rm -rf bin
-	docker images -a --format '{{.Repository}} {{.ID}}' | grep --color=auto 'whalewatcher' | cut -d ' ' -f2 | xargs docker rmi -f
+	@rm -rf bin
+	@docker-compose down -v
+	@docker images -a --format '{{.Repository}} {{.ID}}' | grep whalewatcher | cut -d ' ' -f2 | xargs docker rmi -f
