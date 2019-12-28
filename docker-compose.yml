@@ -78,7 +78,7 @@ services:
     image: whalewatcher:latest
     container_name: demo-whalewatcher
     ports:
-      - 4444:4444
+      - 5555:4444
     command: ["/bin/whalewatcher", "--config-var", "MONITOR_CONFIG"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

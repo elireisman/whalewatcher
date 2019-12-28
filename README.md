@@ -19,11 +19,13 @@ Requirements:
 ## API
 Processes that block on `whalewatcher` status can reach the service a number of ways. The examples below assume the configuration in the supplied `docker-compose.yml`:
 - Internal (within Docker Compose network, from container context):
-  - `curl http://example-whalewatcher:4444/` to view status for _all_ configured target containers
-  - `curl http://example-whalewatcher:4444/?status=example-kafka,example-elasticsearch` to view status for selected targets only
+  - `curl -sS http://demo-whalewatcher:4444/` to view status for _all_ configured target containers
+  - `curl -sS http://demo-whalewatcher:4444/?status=demo-kafka,demo-elasticsearch` to view status for selected targets only
+  - `curl -sS -o /dev/null -w '%{http_code}' http://demo-whalewatcher:4444/` to view aggregate status only, for all targets
 - External (from host machine using an externally mapped port):
-  - `curl http://localhost:4444/` to view status for _all_ configured target containers
-  - `curl http://localhost:4444/?status=example-kafka,example-elasticsearch` to view status for selected targets only
+  - `curl -sS http://localhost:5555/` to view status for _all_ configured target containers
+  - `curl -sS http://localhost:5555/?status=demo-zookeeper,demo-mysql,demo-mongodb` to view status for selected targets only
+  - `curl -sS -o /dev/null -w '%{http_code}' http://localhost:5555/` to view aggregate status only, for all targets
 
 ### Aggregate Status
 HTTP status codes are used to return aggregate readiness info for all configured targets, or the subset specified in the caller's request. Are we abusing HTTP status codes for convenience here? Probably. I'll let you be the judge.

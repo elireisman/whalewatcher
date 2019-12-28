@@ -18,4 +18,4 @@ trap 'trap - SIGINT SIGTERM ERR ; docker-compose down -v ; exit 0' SIGINT SIGTER
 
 docker-compose up --force-recreate -d &>/dev/null
 
-watch -n 3 'curl -sS http://localhost:4444/ | jq .'
+watch -n 3 'curl -sS http://localhost:5555/ | jq .'
