@@ -1,6 +1,8 @@
-# whalewatcher
+# Purpose
 
-`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via a JSON API callers can poll. It exposes an HTTP endpoint and simple staus API that dependent containers and/or external services can use to determine when a set of target containers are ready to perform work. Using `whalewatcher` in your Docker Compose based project is (pretty straightforward)[./docker-compose.yml], but see below for the juicy details. It's meant as a quick-and-dirty solution for your local dev/CI needs only, so please use as directed.
+When using Docker Compose in local dev or CI envs, it can be tricky to determine the readiness of services your project depends on. Tools like [this](https://github.com/vishnubob/wait-for-it) are great for the simple cases like a web service. However, lots of popular open source software doesn't provide a reliable, simple solution for this. At best, your utility image will require a CLI client for each service your code depends on. Writing such checks is error prone, and the Docker folks [punt on this](https://docs.docker.com/compose/startup-order/) for code you didn't write (or don't want to fork and modify.)
+
+`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. Adding `whalewatcher` in your Docker Compose based project is (pretty straightforward)[./docker-compose.yml], but see below for the juicy details. It's meant as a quick-and-dirty solution for your local dev/CI needs.
 
 ## Demo
 Requirements:
