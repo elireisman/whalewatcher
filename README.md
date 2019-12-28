@@ -1,13 +1,20 @@
 # whalewatcher
 
-Have you ever used Docker Compose to manage your local dev or CI environment's backing data stores, and found it tricky to automate interactions with those stores due to difficulty determining when the containers are ready to process data? `depends_on` or `curl`ing a liveness endpoint will suffice in the simple cases, but in many cases the store doesn't supply a simple, reliable solution. Coordinating such dependencies is a headache itself, and scripting checks for heterogenous systems in your pipeline can be ponderous and error-prone.
-
-`whalewatcher` will monitor each specified containers' logs for a regex pattern you specify, exposing an HTTP endpoint dependent containers or external services in your project can use to determine readiness of all target containers, or any subset of interest. (Setup is easy)[./docker-compose.yml]. The endpoint returns granular JSON-formatted status info as well as aggregate status via the HTTP status code in the response. Calling services can determine with confidence when all of their service dependencies are ready to perform work, minus the boilerplate and setup complexity.
+`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via a JSON API callers can poll. It exposes an HTTP endpoint and simple staus API that dependent containers and/or external services can use to determine when a set of target containers are ready to perform work. Using `whalewatcher` in your Docker Compose based project is (pretty straightforward)[./docker-compose.yml], but see below for the juicy details. It's meant as a quick-and-dirty solution for your local dev/CI needs only, so please use as directed.
 
 ## Demo
-If you have Docker and Docker Compose installed locally, you can run `make demo` to see a service waiting on `whalewatcher` in action, using the included example Compose file.
+Requirements:
+ - `make`, `docker`, and `docker-compose` installed locally
+ - exec one of the `make` targets listed below, `CTRL-C` to exit
 
-Other `make` targets of interest: `build`, `docker`, `example`, `test` and `clean`.
+| `make` Target | Action Taken             |
+| ------------- | ------------------------ |
+| demo          | builds whalewatcher, runs `docker-compose`, `curl`s `whalewatcher` from host machine to demo an external service awaiting dependent services |
+| internal-demo | builds `whalewatcher`, runs `docker-compose`, `curl`s `whalewatcher` from `watcher` service demo a containerized service awaiting dependent services |
+| example       | builds `whalewatcher`, runs `docker-compose`, tails the logs from the `whalewatcher` container itself to provide more detailed in-flight view |
+| clean         | removes built binaries and locally cached `whalewatcher` images, shuts down and cleans up `docker-compose` demo services |
+| build         | builds the `whalewatcher` binary locally on the host |
+| docker        | builds the `whalewatcher:latest` Docker image locally |
 
 ## API
 Processes that block on `whalewatcher` status can reach the service a number of ways. The examples below assume the configuration in the supplied `docker-compose.yml`:
@@ -21,13 +28,13 @@ Processes that block on `whalewatcher` status can reach the service a number of 
 ### Aggregate Status
 HTTP status codes are used to return aggregate readiness info for all configured targets, or the subset specified in the caller's request. Are we abusing HTTP status codes for convenience here? Probably. I'll let you be the judge.
 
-| Code         | Meaning                                        |
-| ------------ | -----------------                              |
-| 200          | All services ready                             |
-| 202          | Some services not ready yet - continue polling |
-| 404          | The requested service(s) are not configured    |
-| 500          | Internal error, check Compose and config files |
-| 503          | One or more target services in fatal error     |
+| Status Code  | Meaning           |
+| ------------ | ----------------- |
+| 200          | All services ready for action |
+| 202          | Some services not ready yet, please continue polling |
+| 404          | The requested service(s) are not configured in `whalewatcher`  |
+| 500          | Internal error, check your Compose and config files and error logs |
+| 503          | One or more target services experienced a fatal error, start over   |
 
 ### Detailed Status
 In addition, responses from `whalewatcher` will include a JSON body with a detailed status for each requested service:
@@ -49,9 +56,9 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
 
 ### Add to your project
 - Add a service using the `whalewatcher:latest` image to your `docker-compose.yml`
-- Mount the `docker.sock` as shown in the exmaple, or otherwise configure the Docker API env vars for your client
-- Mount the `whalewatcher` YAML config file or supply the YAML inline as shown in the example (see below for details)
-- Expose a port of your choice and direct callers to block, pinging the endpoint until `whalewatcher` responds with a `200 OK`
+- Mount the `docker.sock` as shown in the example Compose file, or configure the Docker API env vars for your client
+- Configure the `whalewatcher` container instance (see below for details)
+- Direct dependent services to poll `whalewatcher` for readiness status on containers of interest
 
 ### Configure the tool
 `whalewatcher` is configured using YAML. Users can supply the configuration inline in an environment var using the `--config-var <NAME>` argument, or by mounting a YAML file into the container and supplying the `--config-file <PATH>` argument. Each entry in the `containers` clause should be keyed using the `container_name` of the services to be monitored. Add a `container_name: <NAME>` entry to each clause in your Docker Compose if absent.
