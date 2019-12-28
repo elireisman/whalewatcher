@@ -44,9 +44,11 @@ func New(ctx context.Context, client *docker.Client, pub *Publisher, containerNa
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile log scanning pattern /%s/ got: %s", target.Pattern, err)
 	}
+	logger.Printf("INFO regex pattern compiled: %s", target.Pattern)
 
 	// register the specified app
 	pub.Add(containerName, Status{})
+	logger.Println("INFO container registered for monitoring")
 
 	// the remaining fields will be populated when Start() is called
 	return &Tailer{
