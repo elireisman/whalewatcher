@@ -14,6 +14,7 @@ import (
 	"github.com/elireisman/whalewatcher/config"
 
 	docker_types "github.com/docker/docker/api/types"
+	docker_container "github.com/docker/docker/api/types/container"
 	docker_filters "github.com/docker/docker/api/types/filters"
 	docker "github.com/docker/docker/client"
 	"github.com/hpcloud/tail"
@@ -208,12 +209,23 @@ FindIDLoop:
 	}
 
 	// await running status for the container, until the remaining wait time expires
-	status, err := t.Client.ContainerWait(timeoutCtx, t.ID)
-	if err != nil {
-		return fmt.Errorf("problem while awaiting running status for container %s: %s", t.ID, err)
-	}
-	if status != 200 {
-		return fmt.Errorf("container %s could not be verified as running in %s (status %d)", t.ID, t.Await, status)
+	statusChan, errChan := t.Client.ContainerWait(timeoutCtx, t.ID, docker_container.WaitConditionNotRunning)
+	select {
+	case <-timeoutCtx.Done():
+		return timeoutCtx.Err()
+
+	case resp := <-statusChan:
+		if resp.StatusCode != 200 {
+			return fmt.Errorf("container %s could not be verified as running, got status: %d", t.ID, resp.StatusCode)
+		}
+		if resp.Error != nil {
+			return fmt.Errorf("container %s could not be verified as running, got error: %s", t.ID, resp.Error)
+		}
+
+	case err := <-errChan:
+		if err != nil {
+			return fmt.Errorf("problem while awaiting running status for container %s: %s", t.ID, err)
+		}
 	}
 
 	return nil

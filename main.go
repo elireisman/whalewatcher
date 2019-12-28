@@ -53,7 +53,7 @@ func main() {
 	ctx, shutdownTailers := context.WithCancel(context.Background())
 	shutdownComplete := make(chan bool)
 
-	client, err := docker.NewEnvClient()
+	client, err := docker.NewClientWithOpts(docker.FromEnv, docker.WithAPIVersionNegotiation())
 	if err != nil {
 		panic(err)
 	}
