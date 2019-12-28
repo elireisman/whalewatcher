@@ -96,5 +96,5 @@ services:
     container_name: demo-watcher
     depends_on:
       - whalewatcher
-    command: ['/bin/sh', '-c', 'apk update && apk add curl jq && watch -n 3 "curl -sS http://demo-whalewatcher:4444/" | jq .']
+    command: ['/bin/sh', '-c', "apk update && apk add curl jq && watch -n 3 'curl -sS http://demo-whalewatcher:4444/ | jq .'"]
 
