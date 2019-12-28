@@ -1,24 +1,33 @@
-# Purpose
+## The Problem
 
-When using Docker Compose in local dev or CI envs, it can be tricky to determine the readiness of services your project depends on. Tools like [this](https://github.com/vishnubob/wait-for-it) are great for the simple cases like a web service. However, lots of popular open source software doesn't provide a reliable, simple solution for this. At best, your utility image will require a CLI client for each service your code depends on. Writing such checks is error prone, and the Docker folks [punt on this](https://docs.docker.com/compose/startup-order/) for code you didn't write (or don't want to fork and modify.)
+Docker and Docker Compose are great for managing services your projects depend on, especially in local dev or CI environments. However, it's often tricky to determine the readiness of containerized services when dependencies are involved. Tools like [this](https://github.com/vishnubob/wait-for-it) are great for the simple cases, but lots of open source software doesn't accommodate such dependencies. Writing one-off checks for a set of heterogenous services is error prone, and the Docker folks [kinda punt on this](https://docs.docker.com/compose/startup-order/) for code you didn't write. At best, your utility image will require a CLI client for each service your code depends on. At worst, you will resort to peppering sleeps into your services' `entrypoint`s or `command` clauses and crossing your fingers. A one-size-fits-all solution we can drop into our Docker Compose projects would be ideal here.
 
-`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. Adding `whalewatcher` in your Docker Compose based project is (pretty straightforward)[./docker-compose.yml], but see below for the juicy details. It's meant as a quick-and-dirty solution for your local dev/CI needs.
+
+## The Solution?
+
+`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. By making use of the `status` URL query parameter, multiple services in your project with distinct dependencies can achieve reliable multi-stage warmup utilizing a single instance of `whalewatcher`.
+
+Adding `whalewatcher` to your Docker or Docker Compose based project is (pretty straightforward)[./docker-compose.yml], but see below for the juicy details. `whalewatcher` is a quick-and-dirty solution for your local dev/CI needs, and isn't intended for Docker Swarm, Kubernetes, or production environments at present. Linux and OSX are verified. Verification on Windows I leave as an exercise for the reader, but the libraries backing `whalewatcher` are Windows compatible so...?
+
 
 ## Demo
+
 Requirements:
  - `make`, `docker`, and `docker-compose` installed locally
  - exec one of the `make` targets listed below, `CTRL-C` to exit
 
 | `make` Target | Action Taken             |
 | ------------- | ------------------------ |
-| demo          | builds whalewatcher, runs `docker-compose`, `curl`s `whalewatcher` from host machine to demo an external service awaiting dependent services |
-| internal-demo | builds `whalewatcher`, runs `docker-compose`, `curl`s `whalewatcher` from `watcher` service demo a containerized service awaiting dependent services |
-| example       | builds `whalewatcher`, runs `docker-compose`, tails the logs from the `whalewatcher` container itself to provide more detailed in-flight view |
+| demo          | runs `docker-compose`, `curl`s `whalewatcher` from host machine to demo an external service monitoring status of services it depends on |
+| internal-demo | runs `docker-compose`, `curl`s `whalewatcher` from `watcher` service to demo a containerized service monitoring status of services it depends on |
+| example       | runs `docker-compose`, tails the logs from the `whalewatcher` container itself to provide an under-the-hood view of what it does |
 | clean         | removes built binaries and locally cached `whalewatcher` images, shuts down and cleans up `docker-compose` demo services |
 | build         | builds the `whalewatcher` binary locally on the host |
 | docker        | builds the `whalewatcher:latest` Docker image locally |
 
+
 ## API
+
 Processes that block on `whalewatcher` status can reach the service a number of ways. The examples below assume the configuration in the supplied `docker-compose.yml`:
 - Internal (within Docker Compose network, from container context):
   - `curl -sS http://demo-whalewatcher:4444/` to view status for _all_ configured target containers
@@ -48,7 +57,7 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
   "demo-elasticsearch": {
     "ready": false,
     "at": "2019-06-19T12:15:33.1721458Z",
-    "error": "Jun 19 12:15:33 my.es.server.net elasticsearch[1234]: java.io.FileNotFoundException: /var/run/elasticsearch/elasticsearch.pid (No such file or directory)"
+    "error": "java.io.FileNotFoundException: /var/run/elasticsearch/elasticsearch.pid (No such file or directory)"
   },
   "demo-kafka": {
     "ready": true,
@@ -62,18 +71,22 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
 }
 ```
 
+
 ## Setup
 
 ### Add to your project
 - Add a service using the `initialcontext/whalewatcher:latest` [image](https://hub.docker.com/repository/docker/initialcontext/whalewatcher) to your `docker-compose.yml`
-- Mount the `docker.sock` as shown in the example Compose file, or configure the Docker API env vars for your client
+- Configure the Docker API client for your `whalewatcher` service (choose one):
+    - Mount the host `docker.sock` as shown in the example Compose file
+    - Configure the env vars for the [API client](https://godoc.org/github.com/docker/docker/client)
 - Configure the `whalewatcher` container instance (see below for details)
+- Ensure all the `service`s you will monitor set a `container_name: <NAME>` attribute
 - Direct dependent services to poll `whalewatcher` for readiness status on containers of interest
 
 ### Configure the tool
-`whalewatcher` is configured using YAML. Users can supply the configuration inline in an environment var using the `--config-var <NAME>` argument, or by mounting a YAML file into the container and supplying the `--config-file <PATH>` argument. Each entry in the `containers` clause should be keyed using the `container_name` of the services to be monitored. Add a `container_name: <NAME>` entry to each clause in your Docker Compose if absent.
+`whalewatcher` is configured using a YAML file and some CLI arguments. Each entry in the `containers` clause should be keyed using the `container_name` of the service to be monitored. The `pattern` attribute is used to supply a regex pattern to match a log line indicating the monitored service is ready.
 
-Example format:
+#### Example config file
 ```
 containers:
   container_name_one:
@@ -83,8 +96,17 @@ containers:
   # ...and so on...
 ```
 
-In addition, you can supply CLI arguments to override the port `whalewatcher` listens on, and the amount of time (in milliseconds) `whalewatcher` will await each target container's startup before log monitoring begins. Exceeding this timeout marks the target as a failed launch, which can be helpful in the event of a config typo or other upstream problems with your Docker Compose setup.
+#### CLI arguments
+Arguments you can supply to `whalewatcher` directly:
+
+| Argument | Default | Example | Description |
+| -------- | ------- | ------- | ----------- |
+| `--config-path` | "/etc/whalewatcher/config.yaml" | "./whalewatcher.yaml" | Path to YAML service config file |
+| `--config-var`  | "" | "SOME_ENV_VAR" | If set, the name of the env var in which the YAML config is inlined |
+| `--wait-millis` | 60000 | 10000 | Time in millis `whalewatcher` should await each target container before signalling failure |
+| `--port`        | 4444 | 5432 | the port `whalewatcher` should listen on to expose the status API |
+
 
 ## Contributing
-`whalewatcher` has successfully reduced my annoyance and stress levels setting up a new data project with Docker Compose in my dev/CI env, but feels pretty "alpha" still. There's lots to do to make it more flexible, robust, and simple to set up and use. PR's welcome!
+`whalewatcher` has successfully reduced my annoyance and stress levels setting up a new project with Docker Compose in my dev/CI env, but feels pretty "alpha" still. PR's welcome!
 
