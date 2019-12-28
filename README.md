@@ -25,7 +25,7 @@ Processes that block on `whalewatcher` status can reach the service a number of 
 - External (from host machine using an externally mapped port):
   - `curl -sS http://localhost:5555/` to view status for _all_ configured target containers
   - `curl -sS http://localhost:5555/?status=demo-zookeeper,demo-mysql,demo-mongodb` to view status for selected targets only
-  - `curl -sS -o /dev/null -w '%{http_code}' http://localhost:5555/` to view aggregate status only, for all targets
+  - `curl -sS -o /dev/null -w '%{http_code}' http://localhost:5555/?status=demo-mysql,demo-redis` to view aggregate status only, for selected targets
 
 ### Aggregate Status
 HTTP status codes are used to return aggregate readiness info for all configured targets, or the subset specified in the caller's request. Are we abusing HTTP status codes for convenience here? Probably. I'll let you be the judge.
@@ -43,12 +43,18 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
 
 ```
 {
-  "example-elasticsearch": {
+  "demo-elasticsearch": {
     "ready": false,
+    "at": "2019-06-19T12:15:33.1721458Z",
     "error": "Jun 19 12:15:33 my.es.server.net elasticsearch[1234]: java.io.FileNotFoundException: /var/run/elasticsearch/elasticsearch.pid (No such file or directory)"
   },
-  "example-kafka": {
+  "demo-kafka": {
     "ready": true,
+    "at": "2019-06-19T12:13:01.1721561Z",
+    "error": ""
+  }
+  "demo-mongodb": {
+    "ready": false
     "error": ""
   }
 }
