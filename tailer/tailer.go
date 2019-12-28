@@ -46,7 +46,7 @@ func New(ctx context.Context, client *docker.Client, pub *Publisher, containerNa
 	}
 
 	// register the specified app
-	pub.Add(containerName, Status{At: time.Now().UTC()})
+	pub.Add(containerName, Status{})
 
 	// the remaining fields will be populated when Start() is called
 	return &Tailer{
@@ -140,8 +140,9 @@ func (t *Tailer) Start() {
 
 			if line.Err != nil {
 				t.Logger.Printf("ERROR while tailing log for service: %s", line.Err)
+				now := time.Now().UTC()
 				t.Publisher.Add(t.Name, Status{
-					At:    time.Now().UTC(),
+					At:    &now,
 					Error: line.Err.Error(),
 				})
 				return
@@ -156,9 +157,10 @@ func (t *Tailer) Start() {
 
 				t.Logger.Printf("INFO target pattern matched log %s", lineInfo)
 
+				now := time.Now().UTC()
 				t.Publisher.Add(t.Name, Status{
 					Ready: true,
-					At:    time.Now().UTC(),
+					At:    &now,
 				})
 				return
 			}
@@ -218,7 +220,8 @@ FindIDLoop:
 func (t *Tailer) publishError(err error, format string, args ...interface{}) {
 	msg := fmt.Sprintf(format+": "+err.Error(), args...)
 	t.Logger.Println("ERROR " + msg)
-	t.Publisher.Add(t.Name, Status{At: time.Now().UTC(), Error: msg})
+	now := time.Now().UTC()
+	t.Publisher.Add(t.Name, Status{At: &now, Error: msg})
 }
 
 // HTTP Status code in a response is determined

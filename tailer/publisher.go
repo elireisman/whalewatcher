@@ -13,9 +13,9 @@ import (
 
 // status reported for each app
 type Status struct {
-	Ready bool
-	At    time.Time
-	Error string
+	Ready bool       `json:"ready"`
+	At    *time.Time `json:"at,omitempty"`
+	Error string     `json:"error"`
 }
 
 // obtain a publisher
