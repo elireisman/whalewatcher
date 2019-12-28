@@ -195,7 +195,7 @@ FindIDLoop:
 			for _, container := range containers {
 				if t.Name == strings.TrimPrefix(container.Names[0], "/") {
 					t.ID = container.ID
-					t.Logger.Printf("INFO t.Name container %s is up", t.ID)
+					t.Logger.Printf("INFO container %s is up", t.ID)
 					break FindIDLoop
 				}
 			}
