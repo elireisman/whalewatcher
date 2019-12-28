@@ -18,6 +18,11 @@ demo:
 internal-demo:
 	./script/internal-demo
 
+push: docker
+	docker login --username initialcontext docker.io
+	docker tag whalewatcher:latest initialcontext/whalewatcher:latest
+	docker push initialcontext/whalewatcher:latest
+
 clean:
 	@rm -rf bin
 	@docker-compose down -v
