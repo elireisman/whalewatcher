@@ -1,13 +1,18 @@
 ## The Problem
 
-Docker and Docker Compose are great for managing services your projects depend on, especially in local dev or CI environments. However, it's often tricky to determine the readiness of containerized services when dependencies are involved. Tools like [this](https://github.com/vishnubob/wait-for-it) are great for the simple cases, but lots of open source software doesn't accommodate such dependencies. Writing one-off checks for a set of heterogenous services is error prone, and the Docker folks [kinda punt on this](https://docs.docker.com/compose/startup-order/) for code you didn't write. At best, your utility image will require a CLI client for each service your code depends on. At worst, you will resort to peppering sleeps into your services' `entrypoint`s or `command` clauses and crossing your fingers. A one-size-fits-all solution we can drop into our Docker Compose projects would be ideal here.
+Docker and Docker Compose are great for managing services your projects depend on, especially in local dev or CI environments. However, it's often tricky to determine the readiness of containerized services when dependencies are involved. Tools like [this](https://github.com/vishnubob/wait-for-it) are great for the simple cases, but lots of open source software doesn't accommodate this approach and can cause friction in a multi-stage Compose project.
+
+Writing one-off checks for a set of heterogenous services is error prone, and the Docker folks [kinda punt on this](https://docs.docker.com/compose/startup-order/) for code you didn't write. At best, your utility image will require a CLI client for each service your code depends on. At worst, you will resort to peppering sleeps into your services' `entrypoint`s or `command` clauses and crossing your fingers. A one-size-fits-all solution we can drop into our Docker Compose projects would be ideal here.
 
 
 ## The Solution?
 
 `whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. By making use of the `status` URL query parameter, multiple services in your project with distinct dependencies can achieve reliable multi-stage warmup utilizing a single instance of `whalewatcher`.
 
-Adding `whalewatcher` to your Docker or Docker Compose based project is (pretty straightforward)[./docker-compose.yml], but see below for the juicy details. `whalewatcher` is a quick-and-dirty solution for your local dev/CI needs, and isn't intended for Docker Swarm, Kubernetes, or production environments at present. Linux and OSX are verified. Verification on Windows I leave as an exercise for the reader, but the libraries backing `whalewatcher` are Windows compatible so...?
+Adding `whalewatcher` to your Docker or Docker Compose based project is (pretty straightforward)[./docker-compose.yml], but see below for the juicy details.
+
+#### Disclaimer:
+`whalewatcher` is a quick-and-dirty solution for your local dev/CI needs, and isn't intended for Docker Swarm, Kubernetes, or production environments at present. Linux and OSX are verified. Verification on Windows I leave as an exercise for the reader, but the libraries backing `whalewatcher` are Windows compatible so...?
 
 
 ## Demo
