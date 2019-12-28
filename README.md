@@ -65,7 +65,7 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
 ## Setup
 
 ### Add to your project
-- Add a service using the `whalewatcher:latest` image to your `docker-compose.yml`
+- Add a service using the `initialcontext/whalewatcher:latest` [image](https://hub.docker.com/repository/docker/initialcontext/whalewatcher) to your `docker-compose.yml`
 - Mount the `docker.sock` as shown in the example Compose file, or configure the Docker API env vars for your client
 - Configure the `whalewatcher` container instance (see below for details)
 - Direct dependent services to poll `whalewatcher` for readiness status on containers of interest

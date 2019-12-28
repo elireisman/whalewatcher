@@ -75,7 +75,7 @@ services:
       - 6379
 
   whalewatcher:
-    image: whalewatcher:latest
+    image: initialcontext/whalewatcher:latest
     container_name: demo-whalewatcher
     ports:
       - 5555:4444

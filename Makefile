@@ -9,13 +9,13 @@ docker:
 	if ! which -s docker; then echo "Docker not installed"; exit 1; fi
 	docker build -t whalewatcher:latest .
 
-example: docker
+example:
 	./script/example
 
-demo: docker
+demo:
 	./script/demo
 
-internal-demo: docker
+internal-demo:
 	./script/internal-demo
 
 clean:
