@@ -81,15 +81,15 @@ services:
       MONITOR_CONFIG: |
         containers:
           demo-elasticsearch:
-            pattern: 'java'
+            pattern: 'cluster UUID set to \[A-Za-z0-9]+\]'
           demo-redis:
-            pattern: 'ready'
+            pattern: 'Ready to accept connections'
           demo-mysql:
             pattern: 'mysqld: ready for connections'
           demo-kafka:
-            pattern: '[Aa]pache [Kk]afka'
+            pattern: 'Cached leader info PartitionState'
           demo-zookeeper:
-            pattern: 'java'
+            pattern: 'Established session'
 
   internal_demo_watcher:
     image: alpine:latest
