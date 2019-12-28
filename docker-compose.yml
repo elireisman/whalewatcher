@@ -33,11 +33,10 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.3.1
     container_name: demo-elasticsearch
     environment:
-      - cluster.name=demo-es
+      - cluster.name=demo-elasticsearch
       - action.auto_create_index=false
       - bootstrap.memory_lock=true
       - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms512M -Xmx512M"
       - xpack.security.enabled=false
       - xpack.monitoring.enabled=false
       - xpack.ml.enabled=false
@@ -54,6 +53,12 @@ services:
       - IPC_LOCK
     expose:
       - 9200
+
+  monogdb:
+    image: bitnami/mongodb:latest
+    container_name: demo-mongodb
+    expose:
+      - 27017
 
   mysql:
     image: percona:5.7.21
@@ -81,15 +86,17 @@ services:
       MONITOR_CONFIG: |
         containers:
           demo-elasticsearch:
-            pattern: 'cluster UUID set to \[A-Za-z0-9]+\]'
+            pattern: 'recovered \[\d+\] indices into cluster_state'
           demo-redis:
             pattern: 'Ready to accept connections'
           demo-mysql:
             pattern: 'mysqld: ready for connections'
+          demo-mongodb:
+            pattern: 'waiting for connections on port \d+'
           demo-kafka:
             pattern: 'Cached leader info PartitionState'
           demo-zookeeper:
-            pattern: 'Established session'
+            pattern: 'Established session 0x[a-f0-9]+'
 
   internal_demo_watcher:
     image: alpine:latest
