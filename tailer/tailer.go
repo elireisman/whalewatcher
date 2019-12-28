@@ -14,7 +14,6 @@ import (
 	"github.com/elireisman/whalewatcher/config"
 
 	docker_types "github.com/docker/docker/api/types"
-	docker_container "github.com/docker/docker/api/types/container"
 	docker_filters "github.com/docker/docker/api/types/filters"
 	docker "github.com/docker/docker/client"
 	"github.com/hpcloud/tail"
@@ -70,7 +69,7 @@ func (t *Tailer) Start() {
 	var err error
 
 	// await target container startup and obtain container ID for this run
-	if err = t.awaitContainerUp(); err != nil {
+	if err = t.obtainIDForRunningContainer(); err != nil {
 		t.publishError(err, "target container not up")
 		return
 	}
@@ -104,15 +103,19 @@ func (t *Tailer) Start() {
 	}
 
 	defer func() {
+		// tear down the tailer (named pipe -> log tailer)
 		t.Driver.Cleanup()
-
+		// trigger the Docker (log stream -> named pipe) to tear down
 		close(t.Done)
-		t.Reader.Close()
-		t.Writer.Close()
 	}()
 
 	// copy log stream from Docker client into named pipe for tailer to consume
 	go func() {
+		defer func() {
+			t.Writer.Close()
+			t.Reader.Close()
+		}()
+
 		for {
 			select {
 			case <-t.Done:
@@ -127,6 +130,8 @@ func (t *Tailer) Start() {
 		}
 	}()
 
+	lineCount := 0
+
 	// consume log lines until the context is canceled (global shutdown triggered)
 	// an unrecoverable tailing error occurs, or a matching log line is found
 	for {
@@ -136,6 +141,7 @@ func (t *Tailer) Start() {
 			return
 
 		case line, ok := <-t.Driver.Lines:
+			lineCount++
 			if !ok {
 				t.Logger.Printf("INFO tailer for service shutting down (feed closed)")
 				return
@@ -152,13 +158,7 @@ func (t *Tailer) Start() {
 			}
 
 			if t.Pattern.MatchString(line.Text) {
-				var lineInfo string
-				lineNum, err := t.Driver.Tell()
-				if err == nil {
-					lineInfo = fmt.Sprintf("near line %d", lineNum)
-				}
-
-				t.Logger.Printf("INFO target pattern matched log %s", lineInfo)
+				t.Logger.Printf("INFO target pattern matched at line %d: %s", lineCount, line.Text)
 
 				now := time.Now().UTC()
 				t.Publisher.Add(t.Name, Status{
@@ -171,13 +171,13 @@ func (t *Tailer) Start() {
 	}
 }
 
-func (t *Tailer) awaitContainerUp() error {
-	t.Logger.Println("INFO awaiting container startup")
+// obtain the container ID for the target service, once it's up
+func (t *Tailer) obtainIDForRunningContainer() error {
+	t.Logger.Println("INFO awaiting container startup for: %s", t.Await)
 
 	timeoutCtx, cancelable := context.WithTimeout(t.Ctx, t.Await)
 	defer cancelable()
 
-	// obtain the container ID for the target service
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
@@ -205,26 +205,6 @@ FindIDLoop:
 				}
 			}
 			t.Logger.Println("INFO awaiting container %s startup", t.Name)
-		}
-	}
-
-	// await running status for the container, until the remaining wait time expires
-	statusChan, errChan := t.Client.ContainerWait(timeoutCtx, t.ID, docker_container.WaitConditionNotRunning)
-	select {
-	case <-timeoutCtx.Done():
-		return timeoutCtx.Err()
-
-	case resp := <-statusChan:
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("container %s could not be verified as running, got status: %d", t.ID, resp.StatusCode)
-		}
-		if resp.Error != nil {
-			return fmt.Errorf("container %s could not be verified as running, got error: %s", t.ID, resp.Error)
-		}
-
-	case err := <-errChan:
-		if err != nil {
-			return fmt.Errorf("problem while awaiting running status for container %s: %s", t.ID, err)
 		}
 	}
 
