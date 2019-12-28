@@ -20,4 +20,4 @@ trap 'trap - SIGINT SIGTERM ERR ; docker-compose down -v ; exit 0' SIGINT SIGTER
 
 docker-compose up --force-recreate -d &>/dev/null
 
-docker logs -f demo-watcher
+docker logs -f demo-app-depends-on-some-services

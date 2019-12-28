@@ -52,8 +52,8 @@ services:
         hard: 65536
     cap_add:
       - IPC_LOCK
-    ports:
-      - 9200:9200
+    expose:
+      - 9200
 
   mysql:
     image: percona:5.7.21
@@ -81,19 +81,19 @@ services:
       MONITOR_CONFIG: |
         containers:
           demo-elasticsearch:
-            pattern: TODO
+            pattern: 'java'
           demo-redis:
-            pattern: TODO
+            pattern: 'ready'
           demo-mysql:
             pattern: 'mysqld: ready for connections'
           demo-kafka:
-            pattern: TODO
+            pattern: '[Aa]pache [Kk]afka'
           demo-zookeeper:
-            pattern: TODO
- 
-  watcher:
+            pattern: 'java'
+
+  internal_demo_watcher:
     image: alpine:latest
-    container_name: demo-watcher
+    container_name: demo-app-depends-on-some-services
     depends_on:
       - whalewatcher
     command: ['/bin/sh', '-c', "apk update && apk add curl jq && watch -n 3 'curl -sS http://demo-whalewatcher:4444/ | jq .'"]
