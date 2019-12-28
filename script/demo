@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -e
+
+#
+# Run the demo compose file, then curls the whalewatcher endpoint for
+# status updates, just as a client process would. CTRL-C to quit.
+#
+
+for TOOL in docker docker-compose curl jq; do
+  if ! which -s "$TOOL"; then
+    echo "Required tool $TOOL is not installed; please install it and rerun $0"
+    exit 1
+  fi
+done
+
+trap 'trap - SIGINT SIGTERM ERR ; docker-compose down -v ; exit 0' SIGINT SIGTERM ERR
+
+docker-compose up --force-recreate -d &>/dev/null
+
+watch -n 3 'curl -sS http://localhost:444/ | jq .'

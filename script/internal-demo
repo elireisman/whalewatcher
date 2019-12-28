@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -e
+
+#
+# runs the demo compose file, tailing the internal Alpine container
+# logs that is curling the whalewatcher endpoint from inside the 
+# compose network as dependent container service would do.
+# CTRL-C to quit.
+#
+
+for TOOL in docker docker-compose; do
+  if ! which -s "$TOOL"; then
+    echo "Required tool $TOOL is not installed; please install it and rerun $0"
+    exit 1
+  fi
+done
+
+trap 'trap - SIGINT SIGTERM ERR ; docker-compose down -v ; exit 0' SIGINT SIGTERM ERR
+
+docker-compose up --force-recreate -d &>/dev/null
+
+docker logs -f demo-watcher

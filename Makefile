@@ -10,12 +10,13 @@ docker:
 	docker build -t whalewatcher:latest .
 
 example: docker
-	if ! which -s docker-compose; then echo "docker-compose not installed"; exit 1; fi
-	./script/exec_in_make whalewatcher
+	./script/example
 
 demo: docker
-	if ! which -s docker-compose; then echo "docker-compose not installed"; exit 1; fi
-	./script/exec_in_make awaiting_warmup
+	./script/demo
+
+internal-demo: docker
+	./script/internal-demo
 
 clean:
 	@rm -rf bin
