@@ -1,4 +1,8 @@
-`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. Adding `whalewatcher` to your project is [easy](#setup). `whalewatcher` is suitable for use in local dev and CI environments.
+## Purpose
+
+`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. Reliable multi-stage warmup sequences can be achieved when each dependent service monitors only the subset of targets of interest to it.
+
+[Adding](#setup) `whalewatcher` to your project and [using](#API) the API is easy. Try the demos [here](#Demo). `whalewatcher` is suitable for use in local dev and CI environments.
 
 
 ## Demo
@@ -29,18 +33,20 @@ Processes that block on `whalewatcher` status can reach the service a number of 
   - `curl -sS http://localhost:5555/?status=demo-zookeeper,demo-mysql,demo-mongodb` to view status for selected targets only
   - `curl -sS -o /dev/null -w '%{http_code}' http://localhost:5555/?status=demo-mysql,demo-redis` to view aggregate status only, for selected targets
 
-### Aggregate Status
+
+#### Aggregate Status
 HTTP status codes are used to return aggregate readiness info for all configured targets, or the subset specified in the caller's request. Are we abusing HTTP status codes for convenience here? Probably. I'll let you be the judge.
 
 | Status Code  | Meaning           |
 | ------------ | ----------------- |
 | 200          | All services ready for action |
-| 202          | Some services not ready yet, please continue polling |
+| 202          | Some services not ready yet, continue polling |
 | 404          | The requested service(s) are not configured in `whalewatcher`  |
-| 500          | Internal error, check your Compose and config files and error logs |
-| 503          | One or more target services experienced a fatal error, start over   |
+| 500          | Internal error, check your config files and error logs |
+| 503          | target service(s) experienced a fatal error, start over   |
 
-### Detailed Status
+
+#### Detailed Status
 In addition, responses from `whalewatcher` will include a JSON body with a detailed status for each requested service:
 
 ```
@@ -65,7 +71,7 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
 
 ## Setup
 
-### <a name="setup">Add to your project</a>
+### Add to your project
 - Add a service using the `initialcontext/whalewatcher:latest` [image](https://hub.docker.com/repository/docker/initialcontext/whalewatcher) to your `docker-compose.yml`
 - Configure the Docker API client for your `whalewatcher` service (choose one):
     - Mount the host `docker.sock` as shown in the example Compose file
@@ -99,5 +105,5 @@ Arguments you can supply to `whalewatcher` directly:
 
 
 ## Contributing
-`whalewatcher` has successfully reduced my annoyance and stress levels setting up a new project with Docker Compose in my dev/CI env, but feels pretty "alpha" still. PR's welcome!
+`whalewatcher` has reduced by stress levels when setting up a new project with Docker Compose in my dev/CI env, but feels pretty alpha still. PR's welcome!
 
