@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -173,7 +172,7 @@ func (t *Tailer) Start() {
 
 // obtain the container ID for the target service, once it's up
 func (t *Tailer) obtainIDForRunningContainer() error {
-	t.Logger.Println("INFO awaiting container startup for: %s", t.Await)
+	t.Logger.Printf("INFO awaiting container startup for interval: %s", t.Await)
 
 	timeoutCtx, cancelable := context.WithTimeout(t.Ctx, t.Await)
 	defer cancelable()
@@ -204,7 +203,7 @@ FindIDLoop:
 					break FindIDLoop
 				}
 			}
-			t.Logger.Println("INFO awaiting container %s startup", t.Name)
+			t.Logger.Println("INFO awaiting container startup")
 		}
 	}
 
@@ -216,31 +215,6 @@ func (t *Tailer) publishError(err error, format string, args ...interface{}) {
 	t.Logger.Println("ERROR " + msg)
 	now := time.Now().UTC()
 	t.Publisher.Add(t.Name, Status{At: &now, Error: msg})
-}
-
-// HTTP Status code in a response is determined
-// in aggregate based on the apps requested:
-//
-// - if any tailed service (in a user request) is not registered: 404
-// - if any service has experienced a tailing error: 503
-// - if the status update list fails to serialize: 500
-// - if any tailed service is not ready yet: 202
-// - if all tailed services are error free and ready: 200
-func determineStatus(out map[string]Status) int {
-	status := http.StatusOK
-
-	for _, evt := range out {
-		if len(evt.Error) > 0 {
-			status = http.StatusServiceUnavailable
-			break
-		}
-		if !evt.Ready {
-			status = http.StatusAccepted
-			break
-		}
-	}
-
-	return status
 }
 
 func pipeName(containerName, containerID string) string {

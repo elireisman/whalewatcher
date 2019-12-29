@@ -98,3 +98,27 @@ func (p *Publisher) populate(services []string) (map[string]Status, error) {
 
 	return out, nil
 }
+
+// HTTP Status code in a response is determined
+// in aggregate based on the apps requested:
+//
+// - if any tailed service (in a user request) is not registered: 404
+// - if any service has experienced a tailing error: 503
+// - if the status update list fails to serialize: 500
+// - if any tailed service is not ready yet: 202
+// - if all tailed services are error free and ready: 200
+func determineStatus(out map[string]Status) int {
+	status := http.StatusOK
+
+	for _, evt := range out {
+		if len(evt.Error) > 0 {
+			status = http.StatusServiceUnavailable
+			break
+		}
+		if !evt.Ready {
+			status = http.StatusAccepted
+		}
+	}
+
+	return status
+}
