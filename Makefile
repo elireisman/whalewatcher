@@ -1,3 +1,5 @@
+WW_TAG ?= latest
+
 build: *.go
 	@mkdir -p bin
 	go build -o bin/whalewatcher .
@@ -7,7 +9,7 @@ test:
 
 docker:
 	if ! which -s docker; then echo "Docker not installed"; exit 1; fi
-	docker build -t whalewatcher:latest .
+	docker build -t whalewatcher:$(WW_TAG) .
 
 example:
 	./script/example
@@ -20,8 +22,8 @@ internal-demo:
 
 push: docker
 	docker login --username initialcontext docker.io
-	docker tag whalewatcher:latest initialcontext/whalewatcher:latest
-	docker push initialcontext/whalewatcher:latest
+	docker tag whalewatcher:$(WW_TAG) initialcontext/whalewatcher:$(WW_TAG)
+	docker push initialcontext/whalewatcher:$(WW_TAG)
 
 clean:
 	@rm -rf bin
