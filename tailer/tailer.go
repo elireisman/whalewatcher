@@ -65,39 +65,14 @@ func New(ctx context.Context, client *docker.Client, pub *Publisher, containerNa
 
 // caller should execute this in a goroutine
 func (t *Tailer) Start() {
-	var err error
-
 	// await target container startup and obtain container ID for this run
-	if err = t.obtainIDForRunningContainer(); err != nil {
-		t.publishError(err, "target container not up")
+	if !t.obtainIDForRunningContainer() {
 		return
 	}
 
-	// wire up the log stream from the container to our monitor
-	opts := docker_types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true}
-	t.Reader, err = t.Client.ContainerLogs(t.Ctx, t.ID, opts)
-	if err != nil {
-		t.publishError(err, "failed to obtain reader for container log stream")
-		return
-	}
-
+	// build pipeline to stream target container's logs into local tailer
 	pipeFile := pipeName(t.Name, t.ID)
-	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
-	t.Writer, err = os.OpenFile(pipeFile, flags, os.ModeNamedPipe)
-	if err != nil {
-		t.publishError(err, "failed to open named pipe %s", pipeFile)
-		return
-	}
-
-	tailCfg := tail.Config{
-		Logger:    t.Logger,
-		MustExist: true,
-		Follow:    true,
-		Pipe:      true,
-	}
-	t.Driver, err = tail.TailFile(pipeFile, tailCfg)
-	if err != nil {
-		t.publishError(err, "failed to tail container logs from pipe %s", pipeFile)
+	if !t.buildLogPipeline(pipeFile) {
 		return
 	}
 
@@ -129,10 +104,9 @@ func (t *Tailer) Start() {
 		}
 	}()
 
-	lineCount := 0
-
 	// consume log lines until the context is canceled (global shutdown triggered)
 	// an unrecoverable tailing error occurs, or a matching log line is found
+	lineCount := 0
 	for {
 		select {
 		case err := <-t.Ctx.Done():
@@ -146,32 +120,72 @@ func (t *Tailer) Start() {
 				return
 			}
 
-			if line.Err != nil {
-				t.Logger.Printf("ERROR while tailing log for service: %s", line.Err)
-				now := time.Now().UTC()
-				t.Publisher.Add(t.Name, Status{
-					At:    &now,
-					Error: line.Err.Error(),
-				})
-				return
-			}
-
-			if t.Pattern.MatchString(line.Text) {
-				t.Logger.Printf("INFO target pattern matched at line %d: %s", lineCount, line.Text)
-
-				now := time.Now().UTC()
-				t.Publisher.Add(t.Name, Status{
-					Ready: true,
-					At:    &now,
-				})
-				return
-			}
+			t.ProcessLine(line, lineCount)
 		}
 	}
 }
 
+// handle processing each log line, publish result if error or match occurs
+func (t *Tailer) ProcessLine(line *tail.Line, lineCount int) {
+	if line.Err != nil {
+		t.Logger.Printf("ERROR while tailing log for service: %s", line.Err)
+		now := time.Now().UTC()
+		t.Publisher.Add(t.Name, Status{
+			At:    &now,
+			Error: line.Err.Error(),
+		})
+		return
+	}
+
+	if t.Pattern.MatchString(line.Text) {
+		t.Logger.Printf("INFO target pattern matched at line %d: %s", lineCount, line.Text)
+
+		now := time.Now().UTC()
+		t.Publisher.Add(t.Name, Status{
+			Ready: true,
+			At:    &now,
+		})
+		return
+	}
+}
+
+func (t *Tailer) buildLogPipeline(pipeFile string) bool {
+	var err error
+
+	// wire up the log stream from the container to our monitor
+	opts := docker_types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true}
+	t.Reader, err = t.Client.ContainerLogs(t.Ctx, t.ID, opts)
+	if err != nil {
+		t.publishError(err, "failed to obtain reader for container log stream")
+		return false
+	}
+
+	// use a named pipe to stream the log output into a form the tailer can accept
+	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	t.Writer, err = os.OpenFile(pipeFile, flags, os.ModeNamedPipe)
+	if err != nil {
+		t.publishError(err, "failed to open named pipe %s", pipeFile)
+		return false
+	}
+
+	// wire up the tailer
+	tailCfg := tail.Config{
+		Logger:    t.Logger,
+		MustExist: true,
+		Follow:    true,
+		Pipe:      true,
+	}
+	t.Driver, err = tail.TailFile(pipeFile, tailCfg)
+	if err != nil {
+		t.publishError(err, "failed to tail container logs from pipe %s", pipeFile)
+		return false
+	}
+
+	return true
+}
+
 // obtain the container ID for the target service, once it's up
-func (t *Tailer) obtainIDForRunningContainer() error {
+func (t *Tailer) obtainIDForRunningContainer() bool {
 	t.Logger.Printf("INFO awaiting container startup for interval: %s", t.Await)
 
 	timeoutCtx, cancelable := context.WithTimeout(t.Ctx, t.Await)
@@ -183,8 +197,9 @@ func (t *Tailer) obtainIDForRunningContainer() error {
 FindIDLoop:
 	for {
 		select {
-		case <-t.Ctx.Done():
-			return fmt.Errorf("failed to obtain container ID for %s in %s: %s", t.Name, t.Await, t.Ctx.Err())
+		case <-timeoutCtx.Done():
+			t.publishError(timeoutCtx.Err(), "failed to obtain container ID for %s in %s", t.Name, t.Await)
+			return false
 
 		case <-ticker.C:
 			opts := docker_types.ContainerListOptions{Filters: docker_filters.NewArgs()}
@@ -207,7 +222,7 @@ FindIDLoop:
 		}
 	}
 
-	return nil
+	return true
 }
 
 func (t *Tailer) publishError(err error, format string, args ...interface{}) {
@@ -218,5 +233,5 @@ func (t *Tailer) publishError(err error, format string, args ...interface{}) {
 }
 
 func pipeName(containerName, containerID string) string {
-	return fmt.Sprintf("%s_%s_whalewatcher", containerName, containerID)
+	return fmt.Sprintf("%s_%s_ww", containerName, containerID)
 }
