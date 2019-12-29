@@ -17,9 +17,6 @@ type Config struct {
 type Service struct {
 	// regex pattern to match in log indicating service readiness
 	Pattern string `yaml:"pattern"`
-
-	// internal: for accessing log streams to monitor from the Docker Engine API
-	ID string `yaml:"-"`
 }
 
 // load config YAML from a file mounted into whalewatcher's container
