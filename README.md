@@ -2,7 +2,7 @@
 
 `whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. Reliable multi-stage warmup sequences can be achieved when each dependent service monitors only the subset of targets of interest to it.
 
-Multiple regex patterns and maximum (error free) readiness wait time can be specified per-target, to cover cold-init and warm restart conditions. [Adding](#setup) `whalewatcher` to your project and [using](#API) the API is easy. Try the demos [here](#Demo). `whalewatcher` is suitable for use in local dev and CI environments.
+Multiple regex patterns and maximum (error free) readiness wait time can be specified per-target, to cover cold-init and warm restart conditions. Each target's log stream is shut down as soon as a match or error is encountered, and status is published. [Adding](#setup) `whalewatcher` to your project and [using](#API) the API is easy. Try the demos [here](#Demo). `whalewatcher` is suitable for use in local dev and CI environments.
 
 
 ## Demo
@@ -117,8 +117,3 @@ Arguments you can supply to `whalewatcher` directly:
 | `--config-var`  | "" | "SOME_ENV_VAR" | If set, the name of the env var in which the YAML config is inlined |
 | `--wait-millis` | 60000 | 10000 | Time to await each target container startup; also default time to await ready status |
 | `--port`        | 4444 | 5432 | the port `whalewatcher` should listen on to expose the status API |
-
-
-## Contributing
-`whalewatcher` has reduced by stress levels when setting up a new project with Docker Compose in my dev/CI env, but feels pretty alpha still. PR's welcome!
-

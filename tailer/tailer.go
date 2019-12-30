@@ -135,11 +135,12 @@ func (t *Tailer) Start() {
 		case line, ok := <-t.Driver.Lines:
 			lineCount++
 			if !ok {
-				t.Logger.Printf("INFO tailer for service shutting down (feed closed)")
+				t.Logger.Println("INFO tailer shutting down (feed closed)")
 				return
 			}
 
 			if t.ProcessLine(line, lineCount) {
+				t.Logger.Printf("INFO tailing completed at line %d for service, shutting down", lineCount)
 				return
 			}
 		}
