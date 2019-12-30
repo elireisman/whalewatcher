@@ -115,7 +115,7 @@ Arguments you can supply to `whalewatcher` directly:
 | --------------- | ------- | ------- | ----------- |
 | `--config-path` | "/etc/whalewatcher/config.yaml" | "./whalewatcher.yaml" | Path to YAML service config file |
 | `--config-var`  | "" | "SOME_ENV_VAR" | If set, the name of the env var in which the YAML config is inlined |
-| `--wait-millis` | 60000 | 10000 | Time in millis `whalewatcher` should await each target container before signalling failure |
+| `--wait-millis` | 60000 | 10000 | Time to await each target container startup; also default time to await ready status |
 | `--port`        | 4444 | 5432 | the port `whalewatcher` should listen on to expose the status API |
 
 
