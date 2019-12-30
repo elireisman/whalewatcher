@@ -89,14 +89,19 @@ services:
             pattern: 'recovered \[\d+\] indices into cluster_state'
           demo-redis:
             pattern: 'Ready to accept connections'
+            max_wait_millis: 20000
           demo-mysql:
-            pattern: 'mysqld: ready for connections'
+            patterns:
+              - 'mysqld: ready for connections'
+              - 'pattern that only matches on cold init'
+              - 'pattern that only matches on restart'
           demo-mongodb:
             pattern: 'waiting for connections on port \d+'
           demo-kafka:
             pattern: 'Cached leader info PartitionState'
           demo-zookeeper:
             pattern: 'Established session 0x[a-f0-9]+'
+            max_wait_millis: 20000
 
   internal_demo_watcher:
     image: alpine:latest
