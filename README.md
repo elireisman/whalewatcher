@@ -2,7 +2,7 @@
 
 `whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. Reliable multi-stage warmup sequences can be achieved when each dependent service monitors only the subset of targets of interest to it.
 
-[Adding](#setup) `whalewatcher` to your project and [using](#API) the API is easy. Try the demos [here](#Demo). `whalewatcher` is suitable for use in local dev and CI environments.
+Multiple regex patterns and maximum (error free) readiness wait time can be specified per-target, to cover cold-init and warm restart conditions. [Adding](#setup) `whalewatcher` to your project and [using](#API) the API is easy. Try the demos [here](#Demo). `whalewatcher` is suitable for use in local dev and CI environments.
 
 
 ## Demo
@@ -84,14 +84,29 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
 `whalewatcher` is configured using a YAML file and some CLI arguments. Each entry in the `containers` clause should be keyed using the `container_name` of the service to be monitored. The `pattern` attribute is used to supply a regex pattern to match a log line indicating the monitored service is ready.
 
 #### Example config file
+Config attributes:
+- `containers` top level map of `container_name`s to config clauses
+- Each config clause:
+  - `pattern`: a single regex pattern
+  - `patterns`: a list of regex patterns
+  - `max_wait_millis`: (optional) amount of time (if different than global `--wait-millis`) to await a match before considering the container up
+
+At minimum, each config clause must specify at least one regex pattern. An Example config file:
 ```
 containers:
   container_name_one:
     pattern: 'regex pattern one'
   container_name_two:
-    pattern: 'regex pattern two'
+    patterns:
+      - 'regex pattern two: for cold startup'
+      - 'regex pattern two: for container restart'
+      - 'more [Pp]atterns? \d+'
+  container_name_three:
+    pattern: '^ERROR '
+    max_wait_millis: 90000
   # ...and so on...
 ```
+
 
 #### CLI arguments
 Arguments you can supply to `whalewatcher` directly:
