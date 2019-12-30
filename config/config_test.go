@@ -15,23 +15,29 @@ func TestConfigFromVar(t *testing.T) {
 containers:
   foo:
     pattern: 'ABC 123'
+    max_wait_millis: 45000
   bar:
-    pattern: 'DEF 234'
+    patterns:
+     - 'DEF 234'
+     - 'XYZ 345'
 `
 
 	os.Setenv(varName, yamlBody)
 	conf, err := FromVar(varName)
 	require.NoError(t, err)
 
-	foo, found := conf.Services["foo"]
+	foo, found := conf.Containers["foo"]
 	require.True(t, found)
 	require.Equal(t, "ABC 123", foo.Pattern)
+	require.Equal(t, 45000, foo.MaxWaitMillis)
 
-	bar, found := conf.Services["bar"]
+	bar, found := conf.Containers["bar"]
 	require.True(t, found)
-	require.Equal(t, "DEF 234", bar.Pattern)
+	require.Len(t, bar.Patterns, 2)
+	require.Equal(t, "DEF 234", bar.Patterns[0])
+	require.Equal(t, "XYZ 345", bar.Patterns[1])
 
-	_, found = conf.Services["does_not_exist"]
+	_, found = conf.Containers["does_not_exist"]
 	require.False(t, found)
 }
 
@@ -41,8 +47,11 @@ func TestConfigFromFile(t *testing.T) {
 containers:
   foo:
     pattern: 'ABC 123'
+    max_wait_millis: 30000
   bar:
-    pattern: 'DEF 234'
+    patterns:
+      - 'DEF 234'
+      - 'XYZ 345'
 `
 
 	dir, err := ioutil.TempDir("", "wwconf")
@@ -56,14 +65,17 @@ containers:
 	conf, err := FromFile(path)
 	require.NoError(t, err)
 
-	foo, found := conf.Services["foo"]
+	foo, found := conf.Containers["foo"]
 	require.True(t, found)
 	require.Equal(t, "ABC 123", foo.Pattern)
+	require.Equal(t, 30000, foo.MaxWaitMillis)
 
-	bar, found := conf.Services["bar"]
+	bar, found := conf.Containers["bar"]
 	require.True(t, found)
-	require.Equal(t, "DEF 234", bar.Pattern)
+	require.Len(t, bar.Patterns, 2)
+	require.Equal(t, "DEF 234", bar.Patterns[0])
+	require.Equal(t, "XYZ 345", bar.Patterns[1])
 
-	_, found = conf.Services["does_not_exist"]
+	_, found = conf.Containers["does_not_exist"]
 	require.False(t, found)
 }

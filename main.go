@@ -71,10 +71,9 @@ func main() {
 	}()
 
 	// start a log monitor for each registered service we found an ID for
-	for name, svc := range conf.Services {
-		waitFor := time.Duration(WaitMillis) * time.Millisecond
-
-		svcTailer, err := tailer.New(ctx, client, publisher, name, svc, waitFor)
+	awaitStartup := time.Duration(WaitMillis) * time.Millisecond
+	for name, svc := range conf.Containers {
+		svcTailer, err := tailer.New(ctx, client, publisher, name, svc, awaitStartup)
 		if err != nil {
 			panic(err)
 		}

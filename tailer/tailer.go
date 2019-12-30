@@ -20,11 +20,12 @@ import (
 
 // performs the log monitoring and status publishing for one service container
 type Tailer struct {
-	Ctx     context.Context
-	Name    string
-	ID      string
-	Pattern *regexp.Regexp
-	Await   time.Duration
+	Ctx          context.Context
+	Name         string
+	ID           string
+	Patterns     []*regexp.Regexp
+	AwaitStartup time.Duration
+	AwaitReady   time.Duration
 
 	Publisher *Publisher
 	Client    *docker.Client
@@ -36,14 +37,19 @@ type Tailer struct {
 	Done   chan bool
 }
 
-func New(ctx context.Context, client *docker.Client, pub *Publisher, containerName string, target config.Service, await time.Duration) (*Tailer, error) {
+func New(ctx context.Context, client *docker.Client, pub *Publisher, containerName string, target config.Container, awaitStartup time.Duration) (*Tailer, error) {
 	logger := log.New(os.Stdout, fmt.Sprintf("[monitoring: %s] ", containerName), log.LstdFlags)
 
-	check, err := regexp.Compile(target.Pattern)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile log scanning pattern /%s/ got: %s", target.Pattern, err)
+	// use global startup wait default for warmup wait unless override supplied in config
+	awaitReady := awaitStartup
+	if target.MaxWaitMillis > 0 {
+		awaitReady = time.Duration(target.MaxWaitMillis) * time.Millisecond
 	}
-	logger.Printf("INFO regex pattern compiled: %s", target.Pattern)
+
+	checks, err := extractPatterns(target, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile regex patterns: %s", err)
+	}
 
 	// register the specified app
 	pub.Add(containerName, Status{})
@@ -51,15 +57,16 @@ func New(ctx context.Context, client *docker.Client, pub *Publisher, containerNa
 
 	// the remaining fields will be populated when Start() is called
 	return &Tailer{
-		Ctx:       ctx,
-		Name:      containerName,
-		ID:        "UNKNOWN",
-		Pattern:   check,
-		Await:     await,
-		Publisher: pub,
-		Client:    client,
-		Logger:    logger,
-		Done:      make(chan bool),
+		Ctx:          ctx,
+		Name:         containerName,
+		ID:           "UNKNOWN",
+		Patterns:     checks,
+		AwaitStartup: awaitStartup,
+		AwaitReady:   awaitReady,
+		Publisher:    pub,
+		Client:       client,
+		Logger:       logger,
+		Done:         make(chan bool),
 	}, nil
 }
 
@@ -107,10 +114,22 @@ func (t *Tailer) Start() {
 	// consume log lines until the context is canceled (global shutdown triggered)
 	// an unrecoverable tailing error occurs, or a matching log line is found
 	lineCount := 0
+	timeoutCtx, cleanup := context.WithTimeout(t.Ctx, t.AwaitReady)
+	defer cleanup()
+
+	start := time.Now()
+	t.Logger.Printf("INFO awaiting container ready status for %s", t.AwaitReady)
+
 	for {
 		select {
-		case err := <-t.Ctx.Done():
-			t.Logger.Printf("INFO tailer shutting down gracefully: %s", err)
+		case <-timeoutCtx.Done():
+			t.Logger.Printf("INFO tailer shutting down after awaiting ready status for %s: %s",
+				time.Since(start), timeoutCtx.Err())
+			now := time.Now().UTC()
+			t.Publisher.Add(t.Name, Status{
+				Ready: true,
+				At:    &now,
+			})
 			return
 
 		case line, ok := <-t.Driver.Lines:
@@ -120,13 +139,15 @@ func (t *Tailer) Start() {
 				return
 			}
 
-			t.ProcessLine(line, lineCount)
+			if t.ProcessLine(line, lineCount) {
+				return
+			}
 		}
 	}
 }
 
 // handle processing each log line, publish result if error or match occurs
-func (t *Tailer) ProcessLine(line *tail.Line, lineCount int) {
+func (t *Tailer) ProcessLine(line *tail.Line, lineCount int) bool {
 	if line.Err != nil {
 		t.Logger.Printf("ERROR while tailing log for service: %s", line.Err)
 		now := time.Now().UTC()
@@ -134,19 +155,23 @@ func (t *Tailer) ProcessLine(line *tail.Line, lineCount int) {
 			At:    &now,
 			Error: line.Err.Error(),
 		})
-		return
+		return true
 	}
 
-	if t.Pattern.MatchString(line.Text) {
-		t.Logger.Printf("INFO target pattern matched at line %d: %s", lineCount, line.Text)
+	for _, pattern := range t.Patterns {
+		if pattern.MatchString(line.Text) {
+			t.Logger.Printf("INFO target pattern matched at line %d: %s", lineCount, line.Text)
 
-		now := time.Now().UTC()
-		t.Publisher.Add(t.Name, Status{
-			Ready: true,
-			At:    &now,
-		})
-		return
+			now := time.Now().UTC()
+			t.Publisher.Add(t.Name, Status{
+				Ready: true,
+				At:    &now,
+			})
+			return true
+		}
 	}
+
+	return false
 }
 
 func (t *Tailer) buildLogPipeline(pipeFile string) bool {
@@ -186,9 +211,9 @@ func (t *Tailer) buildLogPipeline(pipeFile string) bool {
 
 // obtain the container ID for the target service, once it's up
 func (t *Tailer) obtainIDForRunningContainer() bool {
-	t.Logger.Printf("INFO awaiting container startup for interval: %s", t.Await)
+	t.Logger.Printf("INFO awaiting container startup for interval: %s", t.AwaitStartup)
 
-	timeoutCtx, cancelable := context.WithTimeout(t.Ctx, t.Await)
+	timeoutCtx, cancelable := context.WithTimeout(t.Ctx, t.AwaitStartup)
 	defer cancelable()
 
 	ticker := time.NewTicker(3 * time.Second)
@@ -198,7 +223,7 @@ FindIDLoop:
 	for {
 		select {
 		case <-timeoutCtx.Done():
-			t.publishError(timeoutCtx.Err(), "failed to obtain container ID for %s in %s", t.Name, t.Await)
+			t.publishError(timeoutCtx.Err(), "failed to obtain container ID for %s in %s", t.Name, t.AwaitStartup)
 			return false
 
 		case <-ticker.C:
@@ -223,6 +248,30 @@ FindIDLoop:
 	}
 
 	return true
+}
+
+func extractPatterns(target config.Container, logger *log.Logger) ([]*regexp.Regexp, error) {
+	var found bool
+	checks := []*regexp.Regexp{}
+
+	if len(target.Pattern) > 0 {
+		target.Patterns = append(target.Patterns, target.Pattern)
+	}
+
+	for _, pattern := range target.Patterns {
+		found = true
+		check, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, err
+		}
+		checks = append(checks, check)
+	}
+
+	if !found {
+		return nil, fmt.Errorf("at least one regex pattern is required")
+	}
+
+	return checks, nil
 }
 
 func (t *Tailer) publishError(err error, format string, args ...interface{}) {

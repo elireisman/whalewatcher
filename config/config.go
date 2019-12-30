@@ -10,18 +10,25 @@ import (
 
 // The config file model - a mapping of container names to monitoring configuration
 type Config struct {
-	Services map[string]Service `yaml:"containers"`
+	Containers map[string]Container `yaml:"containers"`
 }
 
 // The configuration for a single app whalewatcher should monitor
-type Service struct {
+type Container struct {
 	// regex pattern to match in log indicating service readiness
 	Pattern string `yaml:"pattern"`
+
+	// backwards compatible attribute for specifying more than one pattern
+	Patterns []string `yaml:"patterns"`
+
+	// Max time (in milliseconds) to tail a log without errors
+	// before considering the target container warm
+	MaxWaitMillis int `yaml:"max_wait_millis"`
 }
 
 // load config YAML from a file mounted into whalewatcher's container
 func FromFile(pathToFile string) (*Config, error) {
-	conf := &Config{Services: map[string]Service{}}
+	conf := &Config{Containers: map[string]Container{}}
 
 	raw, err := ioutil.ReadFile(pathToFile)
 	if err != nil {
@@ -34,7 +41,7 @@ func FromFile(pathToFile string) (*Config, error) {
 
 // local config YAML from an env var injected into whalewatcher's container env
 func FromVar(varName string) (*Config, error) {
-	conf := &Config{Services: map[string]Service{}}
+	conf := &Config{Containers: map[string]Container{}}
 
 	raw := os.Getenv(varName)
 	if len(raw) == 0 {
