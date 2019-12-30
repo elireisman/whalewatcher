@@ -1,8 +1,10 @@
 ## Purpose
 
-`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. Reliable multi-stage warmup sequences can be achieved when each dependent service monitors only the subset of targets of interest to it.
+`whalewatcher` monitors the `docker log`s of a set of target containers for regex patterns you specify. When a match is found, `whalewatcher` exposes the target's ready status via an API callers can poll. Dependent containers and/or external services can use `whalewatcher` to determine when a set of target containers are ready to perform work. Each target's log stream is terminated at the first match or error, and status is published. Predictable multi-stage warmup sequences can be achieved when each dependent service monitors only the subset of targets of interest to it.
 
-Multiple regex patterns and maximum (error free) readiness wait time can be specified per-target, to cover cold-init and warm restart conditions. Each target's log stream is shut down as soon as a match or error is encountered, and status is published. [Adding](#setup) `whalewatcher` to your project and [using](#API) the API is easy. Try the demos [here](#Demo). `whalewatcher` is suitable for use in local dev and CI environments.
+Multiple regex patterns and maximum (error free) readiness wait time can be specified per-target, to account for matches specific to cold vs. warm startup and the like. [Adding](#setup) `whalewatcher` to your project and [using the API](#API) is easy. Try the demo [here](#Demo) for more.
+
+`whalewatcher` is suitable for use in local dev and CI. In other environments YMMV.
 
 
 ## Demo
