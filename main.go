@@ -29,8 +29,8 @@ var (
 func init() {
 	flag.StringVar(&ConfigPath, "config-path", "/etc/whalewatcher/config.yaml", "path to YAML config file")
 	flag.StringVar(&ConfigVar, "config-var", "", "env var storing the YAML config; overrides config-path if present")
-	flag.IntVar(&WaitMillis, "wait-millis", 60000, "milliseconds to await liveness of each container before monitoring")
-	flag.IntVar(&Port, "port", 4444, "port to serve the readiness check endpoint on")
+	flag.IntVar(&WaitMillis, "wait-millis", 60000, "time to await each container startup; also default time to await ready status")
+	flag.IntVar(&Port, "port", 4444, "status API will be served on this port")
 }
 
 func main() {
