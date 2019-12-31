@@ -88,23 +88,22 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
 #### Example config file
 Config attributes:
 - `containers` top level map of `container_name`s to config clauses
-- Each config clause:
-  - `pattern`: a single regex pattern
-  - `patterns`: a list of regex patterns
-  - `max_wait_millis`: (optional) amount of time (if different than global `--wait-millis`) to await a match before considering the container up
+- Each config clause conists of:
+  - `pattern` or `patterns`: a single or a list of regex patterns to match
+  - `max_wait_millis`: (optional) overrides global `--wait-millis`, time to await a match or error before considering the container up
 
 At minimum, each config clause must specify at least one regex pattern. An Example config file:
 ```
 containers:
   container_name_one:
-    pattern: 'regex pattern one'
+    pattern: 'regex (pattern|string)? \d+\.\d+$'
   container_name_two:
     patterns:
-      - 'regex pattern two: for cold startup'
-      - 'regex pattern two: for container restart'
+      - 'regex pattern for container cold (init|startup)'
+      - 'regex pattern for container (re)?start'
       - 'more [Pp]atterns? \d+'
   container_name_three:
-    pattern: '^ERROR '
+    pattern: '^INFO up and running yay!'
     max_wait_millis: 90000
   # ...and so on...
 ```
