@@ -25,7 +25,7 @@ Requirements:
 
 ## API
 
-Processes that block on `whalewatcher` status can reach the service a number of ways. The examples below assume the configuration in the supplied `docker-compose.yml`:
+Processes that block on `whalewatcher` status can reach the service a number of ways. The examples below assume the configuration in the [supplied](./docker-compose.yaml) `docker-compose.yml`:
 - Internal (within Docker Compose network, from container context):
   - `curl -sS http://demo-whalewatcher:4444/` to view status for _all_ configured target containers
   - `curl -sS http://demo-whalewatcher:4444/?status=demo-kafka,demo-elasticsearch` to view status for selected targets only
@@ -110,11 +110,11 @@ containers:
 
 
 #### CLI arguments
-Arguments you can supply to `whalewatcher` directly:
+Try `make && bin/whalewatcher --help` for the rundown. Table with examples:
 
-| Argument        | Default | Example | Description |
-| --------------- | ------- | ------- | ----------- |
-| `--config-path` | "/etc/whalewatcher/config.yaml" | "./whalewatcher.yaml" | Path to YAML service config file |
-| `--config-var`  | "" | "SOME_ENV_VAR" | If set, the name of the env var in which the YAML config is inlined |
-| `--wait-millis` | 60000 | 10000 | Time to await each target container startup; also default time to await ready status |
-| `--port`        | 4444 | 5432 | the port `whalewatcher` should listen on to expose the status API |
+| Argument        | Example | Description |
+| --------------- | ------- | ----------- |
+| `--config-path` | "./whalewatcher.yaml" | Path to YAML config file |
+| `--config-var`  | "SOME_ENV_VAR" | If set, the env var the YAML config is inlined into |
+| `--wait-millis` | 10000 | Time to await each container startup; also default time to await ready status |
+| `--port`        | 5432 | the port `whalewatcher` should expose the status API on |
