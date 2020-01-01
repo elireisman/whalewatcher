@@ -17,9 +17,10 @@ containers:
     pattern: 'ABC 123'
     max_wait_millis: 45000
   bar:
+    since: 24h
     patterns:
-     - 'DEF 234'
-     - 'XYZ 345'
+     - '^start \d+'
+     - '(INFO|DEBUG) ready'
 `
 
 	os.Setenv(varName, yamlBody)
@@ -33,9 +34,10 @@ containers:
 
 	bar, found := conf.Containers["bar"]
 	require.True(t, found)
+	require.Equal(t, "24h", bar.Since)
 	require.Len(t, bar.Patterns, 2)
-	require.Equal(t, "DEF 234", bar.Patterns[0])
-	require.Equal(t, "XYZ 345", bar.Patterns[1])
+	require.Equal(t, "^start \\d+", bar.Patterns[0])
+	require.Equal(t, "(INFO|DEBUG) ready", bar.Patterns[1])
 
 	_, found = conf.Containers["does_not_exist"]
 	require.False(t, found)
@@ -49,6 +51,7 @@ containers:
     pattern: 'ABC 123'
     max_wait_millis: 30000
   bar:
+    since: 48h
     patterns:
       - 'DEF 234'
       - 'XYZ 345'
@@ -72,6 +75,7 @@ containers:
 
 	bar, found := conf.Containers["bar"]
 	require.True(t, found)
+	require.Equal(t, "48h", bar.Since)
 	require.Len(t, bar.Patterns, 2)
 	require.Equal(t, "DEF 234", bar.Patterns[0])
 	require.Equal(t, "XYZ 345", bar.Patterns[1])

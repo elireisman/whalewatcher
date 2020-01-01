@@ -23,6 +23,7 @@ type Tailer struct {
 	Ctx          context.Context
 	Name         string
 	ID           string
+	Since        time.Duration
 	Patterns     []*regexp.Regexp
 	AwaitStartup time.Duration
 	AwaitReady   time.Duration
@@ -46,12 +47,24 @@ func New(ctx context.Context, client *docker.Client, pub *Publisher, containerNa
 		awaitReady = time.Duration(target.MaxWaitMillis) * time.Millisecond
 	}
 
+	// capture "since" filter override for log stream, if specified in config
+	since := time.Duration(0)
+	if len(target.Since) > 0 {
+		dur, err := time.ParseDuration(target.Since)
+		if err != nil {
+			return nil, fmt.Errorf("parsing --since: invalid time.Duration string in value: %s", target.Since)
+		}
+		since = dur
+		logger.Printf("INFO limiting log stream to window: now - %s", since)
+	}
+
+	// parse, compile, cache all the specified regex patterns
 	checks, err := extractPatterns(target, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile regex patterns: %s", err)
 	}
 
-	// register the specified app
+	// register the specified service under it's container_name
 	pub.Add(containerName, Status{})
 	logger.Println("INFO container registered for monitoring")
 
@@ -60,6 +73,7 @@ func New(ctx context.Context, client *docker.Client, pub *Publisher, containerNa
 		Ctx:          ctx,
 		Name:         containerName,
 		ID:           "UNKNOWN",
+		Since:        since,
 		Patterns:     checks,
 		AwaitStartup: awaitStartup,
 		AwaitReady:   awaitReady,
@@ -179,7 +193,16 @@ func (t *Tailer) buildLogPipeline(pipeFile string) bool {
 	var err error
 
 	// wire up the log stream from the container to our monitor
-	opts := docker_types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true}
+	opts := docker_types.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+	}
+	if t.Since != time.Duration(0) {
+		opts.Since = time.Now().Add(-t.Since).Format(time.RFC3339)
+		t.Logger.Printf("INFO filtering log stream for lines no older than %s", t.Since)
+	}
+
 	t.Reader, err = t.Client.ContainerLogs(t.Ctx, t.ID, opts)
 	if err != nil {
 		t.publishError(err, "failed to obtain reader for container log stream")

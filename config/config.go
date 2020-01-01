@@ -21,9 +21,13 @@ type Container struct {
 	// backwards compatible attribute for specifying more than one pattern
 	Patterns []string `yaml:"patterns"`
 
-	// Max time (in milliseconds) to tail a log without errors
-	// before considering the target container warm
+	// optional: time to tail the target container's log
+	// (without errors) before marking the container ready
 	MaxWaitMillis int `yaml:"max_wait_millis"`
+
+	// optional: only log lines more recently produced than this will be
+	// fetched during tailing. accepts a time.Duration string
+	Since string `yaml:"since"`
 }
 
 // load config YAML from a file mounted into whalewatcher's container

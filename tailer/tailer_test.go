@@ -82,6 +82,47 @@ func TestLineMatchWithMaxWaitDefault(t *testing.T) {
 	require.True(t, pub.state["foo"].Ready)
 }
 
+func TestLineMatchWithSinceFilter(t *testing.T) {
+	targetConf := config.Container{
+		Pattern: `[Tt]est x?foo \d+$`,
+		Since:   "12h",
+	}
+	pub := NewPublisher()
+	tailer, err := New(context.TODO(), nil, pub, "foo", targetConf, time.Second)
+	require.NoError(t, err)
+	require.Equal(t, 12*time.Hour, tailer.Since)
+
+	line := &tail.Line{Text: "this is a Test foo 123"}
+	tailer.ProcessLine(line, 1)
+
+	require.True(t, pub.state["foo"].Ready)
+}
+
+func TestLineMatchWithSinceDefault(t *testing.T) {
+	targetConf := config.Container{
+		Pattern: `[Tt]est x?foo \d+$`,
+	}
+	pub := NewPublisher()
+	tailer, err := New(context.TODO(), nil, pub, "foo", targetConf, time.Second)
+	require.NoError(t, err)
+	require.Equal(t, time.Duration(0), tailer.Since)
+
+	line := &tail.Line{Text: "this is a Test foo 123"}
+	tailer.ProcessLine(line, 1)
+
+	require.True(t, pub.state["foo"].Ready)
+}
+
+func TestLineMatchWithInvalidSince(t *testing.T) {
+	targetConf := config.Container{
+		Pattern: `[Tt]est x?foo \d+$`,
+		Since:   "XX__#23",
+	}
+	pub := NewPublisher()
+	_, err := New(context.TODO(), nil, pub, "foo", targetConf, time.Second)
+	require.Error(t, err)
+}
+
 func TestLineError(t *testing.T) {
 	targetConf := config.Container{Pattern: `[Tt]est \d+`}
 	pub := NewPublisher()
