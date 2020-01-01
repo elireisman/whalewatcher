@@ -88,6 +88,7 @@ services:
           demo-elasticsearch:
             pattern: 'recovered \[\d+\] indices into cluster_state'
           demo-redis:
+            since: "24h"
             pattern: 'Ready to accept connections'
             max_wait_millis: 20000
           demo-mysql:
