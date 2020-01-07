@@ -86,7 +86,7 @@ In addition, responses from `whalewatcher` will include a JSON body with a detai
 `whalewatcher` is configured using a YAML file and some CLI arguments. Each entry in the `containers` clause should be keyed using the `container_name` of the service to be monitored. The `pattern` attribute is used to supply a regex pattern to match a log line indicating the monitored service is ready.
 
 #### Example config file
-Config attributes:
+The demo includes an [example configuration](https://github.com/elireisman/whalewatcher/blob/master/docker-compose.yml#L77-L105). Config attributes:
 - `containers` top level map of `container_name`s to config clauses
 - Each config clause conists of:
   - `pattern` or `patterns`: a single or a list of regex patterns to match
