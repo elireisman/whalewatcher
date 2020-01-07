@@ -25,7 +25,7 @@ Requirements:
 
 ## API
 
-Processes that block on `whalewatcher` status can reach the service a number of ways. The examples below assume the configuration in the [supplied](./docker-compose.yaml) `docker-compose.yml`:
+Processes that block on `whalewatcher` status can reach the service a number of ways. The examples below assume the configuration in the [supplied docker-compose.yml](https://github.com/elireisman/whalewatcher/blob/master/docker-compose.yml):
 - Internal (within Docker Compose network, from container context):
   - `curl -sS http://demo-whalewatcher:4444/` to view status for _all_ configured target containers
   - `curl -sS http://demo-whalewatcher:4444/?status=demo-kafka,demo-elasticsearch` to view status for selected targets only
