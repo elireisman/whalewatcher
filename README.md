@@ -15,8 +15,8 @@ Requirements:
 
 | `make` Target | Action Taken             |
 | ------------- | ------------------------ |
-| demo          | runs `docker-compose`, `curl`s `whalewatcher` from host machine to demo an external service monitoring status of services it depends on |
-| internal-demo | runs `docker-compose`, `curl`s `whalewatcher` from `watcher` service to demo a containerized service monitoring status of services it depends on |
+| demo          | runs `docker-compose`, `curl`s `whalewatcher` from host machine to demo an external app monitoring status of services it depends on |
+| internal-demo | runs `docker-compose`, `curl`s `whalewatcher` from [internal_demo_watcher](https://github.com/elireisman/whalewatcher/blob/master/docker-compose.yml#L107-L112) to demo a containerized service monitoring status of services it depends on |
 | example       | runs `docker-compose`, tails the logs from the `whalewatcher` container itself to provide an under-the-hood view of what it does |
 | clean         | removes built binaries and locally cached `whalewatcher` images, shuts down and cleans up `docker-compose` demo services |
 | build         | builds the `whalewatcher` binary locally on the host |
